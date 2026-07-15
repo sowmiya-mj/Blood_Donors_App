@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "768808579408",
+    "project_id": "blood-donors-app-7fe43",
+    "storage_bucket": "blood-donors-app-7fe43.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:768808579408:android:22c0b204d9445f5e7cfc55",
+        "android_client_info": {
+          "package_name": "com.example.blood_donor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhWe4dv7py-ugmYFz1BdjG3_oxqpzrNOo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
