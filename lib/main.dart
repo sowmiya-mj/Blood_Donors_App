@@ -30,7 +30,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: .fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Blood Donors App'),
+      home: const MyHomePage(title: 'Blood Donors App'),
     );
   }
 }
