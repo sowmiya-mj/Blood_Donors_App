@@ -31,10 +31,10 @@ class _SplashScreenState extends State<SplashScreen>
 
     _ecgController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(seconds: 8),
     )..repeat();
 
-    Timer(const Duration(seconds: 3), () {
+    Timer(const Duration(seconds: 8), () {
       if (!mounted) return;
 
       Navigator.pushReplacement(
