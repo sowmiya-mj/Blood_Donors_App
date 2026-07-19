@@ -42,10 +42,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _skip() {
-    _pageController.animateToPage(
-      onboardingData.length - 1,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeInOut,
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const RoleSelectionScreen(),
+      ),
     );
   }
 
