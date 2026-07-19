@@ -27,7 +27,7 @@ const List<OnboardingModel> onboardingData = [
 
   OnboardingModel(
     image: 'assets/images/onboarding3_3_1.png',
-    title: 'Emergency Help in One Tap',
+    title: 'One Tap to Save a Life',
     description:
     'Send instant SOS alerts and connect with eligible donors around you.',
   ),

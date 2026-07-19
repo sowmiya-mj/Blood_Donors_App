@@ -19,7 +19,7 @@ class RoleSelectionScreen extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                const SizedBox(height: 20),
+                const SizedBox(height: 12),
 
                 const Icon(
                   Icons.favorite,
@@ -29,6 +29,18 @@ class RoleSelectionScreen extends StatelessWidget {
 
                 const SizedBox(height: 20),
 
+                Text(
+                  "Every drop Counts",
+                  style: TextStyle(
+                    color: Colors.red.shade400,
+                    fontSize: 14,
+                    fontStyle: FontStyle.italic,
+                    fontWeight: FontWeight.w500
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
                 const Text(
                   "Choose Your Role",
                   style: TextStyle(
@@ -37,7 +49,8 @@ class RoleSelectionScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 10),
+
+                const SizedBox(height: 12),
 
                 Text(
                   "Select how you want to continue",
