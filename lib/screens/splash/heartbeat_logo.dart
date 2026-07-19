@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
-import '../../core/constants/app_colors.dart';
+import 'package:flutter/material.dart';
 
 class HeartbeatLogo extends StatefulWidget {
   const HeartbeatLogo({super.key});
@@ -10,53 +10,100 @@ class HeartbeatLogo extends StatefulWidget {
 }
 
 class _HeartbeatLogoState extends State<HeartbeatLogo>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+    with TickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final AnimationController _floatController;
+  late final AnimationController _shineController;
 
   @override
   void initState() {
     super.initState();
 
-    _controller = AnimationController(
+    // Heartbeat Animation
+    _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
 
-    _animation = Tween<double>(
-      begin: 1.0,
-      end: 1.12,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeInOut,
-      ),
-    );
+    // Floating Animation
+    _floatController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat(reverse: true);
+
+    // Shine Animation
+    _shineController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _pulseController.dispose();
+    _floatController.dispose();
+    _shineController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _animation,
-      child: Container(
-        width: 150,
-        height: 150,
-        decoration: BoxDecoration(
-          color: AppColors.primary.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(
-          Icons.bloodtype,
-          color: AppColors.primary,
-          size: 90,
-        ),
-      ),
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _pulseController,
+        _floatController,
+        _shineController,
+      ]),
+      builder: (context, child) {
+        final scale = 1 + (_pulseController.value * 0.08);
+
+        final floatY = math.sin(_floatController.value * math.pi * 2) * 8;
+
+        return Transform.translate(
+          offset: Offset(0, floatY),
+          child: Transform.scale(
+            scale: scale,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+
+                // Soft Glow
+                Container(
+                  width: 180,
+                  height: 180,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withOpacity(0.18),
+                        blurRadius: 45,
+                        spreadRadius: 15,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Logo
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(100),
+                  child: Stack(
+                    children: [
+
+                      Image.asset(
+                        "assets/images/logo1.png",
+                        width: 150,
+                        height: 130,
+                        fit: BoxFit.contain,
+                      ),
+
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -7,6 +7,7 @@ import '../../core/constants/app_strings.dart';
 import '../onboarding/onboarding_screen.dart';
 import 'ecg_painter.dart';
 import 'heartbeat_logo.dart';
+import 'ecg_animation.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -34,7 +35,7 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(seconds: 8),
     )..repeat();
 
-    Timer(const Duration(seconds: 8), () {
+    Timer(const Duration(seconds: 7), () {
       if (!mounted) return;
 
       Navigator.pushReplacement(
@@ -94,18 +95,10 @@ class _SplashScreenState extends State<SplashScreen>
                 AnimatedBuilder(
                   animation: _ecgController,
                   builder: (context, child) {
-                    return CustomPaint(
-                      size: const Size(250, 80),
-                      painter: EcgPainter(_ecgController.value),
-                    );
+                    return const EcgAnimation();
                   },
                 ),
 
-                const SizedBox(height: 40),
-
-                const CircularProgressIndicator(
-                  color: AppColors.primary,
-                ),
               ],
             ),
           ),
