@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String role;
+
+  const LoginScreen({
+    super.key,
+    required this.role,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -54,9 +59,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 15),
 
-                  const Text(
-                    "Blood Donors",
-                    style: TextStyle(
+                  Text(
+                    widget.role,
+                    style: const TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                     ),
@@ -65,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 8),
 
                   Text(
-                    "Donate Blood • Save Lives",
+                    "Login as ${widget.role}",
                     style: TextStyle(
                       color: Colors.grey.shade600,
                     ),
