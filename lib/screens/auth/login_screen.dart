@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'register_screen.dart';
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -305,7 +306,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
-              onPressed: () { /* TODO: Forgot password */ },
+              onPressed: () { Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ForgotPasswordScreen(roleColor: _roleColor)));},
               style: TextButton.styleFrom(foregroundColor: color, padding: EdgeInsets.zero),
               child: const Text('Forgot password?', style: TextStyle(fontSize: 13)),
             ),
