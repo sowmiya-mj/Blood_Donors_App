@@ -12,7 +12,20 @@
           "package_name": "com.example.blood_donor_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "768808579408-mi9pdv59ku998f1n1evduussrlc3r9n0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.blood_donor_app",
+            "certificate_hash": "1fd175031748b91d7d15d1ce8b9e389182aacf12"
+          }
+        },
+        {
+          "client_id": "768808579408-7324ar7dec8ahhfe3c87t6g1te8k9vc2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAhWe4dv7py-ugmYFz1BdjG3_oxqpzrNOo"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "768808579408-7324ar7dec8ahhfe3c87t6g1te8k9vc2.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "768808579408-u5kv4um5d1ndo2g4vu40d0kl73eu77ok.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.bloodDonorApp"
+              }
+            }
+          ]
         }
       }
     }

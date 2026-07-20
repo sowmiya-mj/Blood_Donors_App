@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -287,7 +288,12 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           Row(children: [
             Text("Don't have an account? ", style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
             GestureDetector(
-              onTap: () { /* TODO: Navigate to Register */ },
+              onTap: () { Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => RegisterScreen(role: widget.role),
+                ),
+              ); },
               child: Text('Register here', style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: color)),
             ),
           ]),
