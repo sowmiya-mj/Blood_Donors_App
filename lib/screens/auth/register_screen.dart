@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import '../../widgets/location_picker.dart'; // adjust path as needed
+import '../../widgets/location_picker.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String role;
