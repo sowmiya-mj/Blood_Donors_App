@@ -377,7 +377,17 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               validator: (v) => v!.isEmpty ? 'Required' : !v.contains('@') || !v.contains('.') ? 'Enter a valid email' : null),
           const SizedBox(height: 16),
           _buildField(controller: _phoneCtrl, label: 'Phone number', hint: '+91 98765 43210', icon: Icons.phone_outlined, color: color, keyboardType: TextInputType.phone,
-              validator: (v) => v!.isEmpty ? 'Required' : null),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Required';
+                // Remove +91 or 0 prefix
+                final digits = v.replaceAll(RegExp(r'\D'), '');
+                final number = digits.startsWith('91') && digits.length == 12
+                    ? digits.substring(2)
+                    : digits;
+                if (number.length != 10) return 'Enter valid 10-digit mobile number';
+                return null;
+              },
+          ),
           const SizedBox(height: 16),
 
           // Location picker

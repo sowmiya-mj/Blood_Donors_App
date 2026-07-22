@@ -3,6 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
+import '../../screens/donor/donor_dashboard.dart';
+import '../../screens/recipient/recipient_dashboard.dart';
+
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -117,7 +120,18 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         email: emailController.text.trim(),
         password: passwordController.text,
       );
-      // TODO: Navigator.pushReplacement to dashboard
+      // Email login success-la:
+// TODO: Navigate to role-based dashboard
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => widget.role.toLowerCase() == 'donor'
+                ? const DonorDashboard()
+                : const RecipientDashboard(),
+          ),
+        );
+      }
     } on FirebaseAuthException catch (e) {
       setState(() {
         switch (e.code) {
