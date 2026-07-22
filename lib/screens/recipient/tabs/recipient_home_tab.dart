@@ -202,7 +202,7 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
           FadeTransition(
             opacity: _cardFade,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 18),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('Nearby Blood Banks',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
