@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../widgets/location_picker.dart'; // adjust path as needed
+import '../../../widgets/location_picker.dart'; // adjust path
 
 class SOSBottomSheet extends StatefulWidget {
   final Map<String, dynamic>? userData;
@@ -24,17 +24,20 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   bool _isSending = false;
+  bool _changeLocation = false; // toggle to show location picker
 
   String? _selectedBloodGroup;
   final _patientNameCtrl = TextEditingController();
   final _hospitalCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  int _units = 1;
+  final _phoneCtrl = TextEditingController();
 
-  // Location
-  String _selectedState = '';
-  String _selectedDistrict = '';
-  String _selectedCity = '';
+  // Location — pre-filled, changeable
+  String _city = '';
+  String _district = '';
+  String _state = '';
+
+  int _units = 1;
 
   late AnimationController _slideController;
   late Animation<double> _slideAnim;
@@ -44,7 +47,12 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
   @override
   void initState() {
     super.initState();
+    // Pre-fill from user data
     _patientNameCtrl.text = widget.userData?['name'] ?? '';
+    _phoneCtrl.text = widget.userData?['phone'] ?? '';
+    _city = widget.userData?['city'] ?? '';
+    _district = widget.userData?['district'] ?? '';
+    _state = widget.userData?['state'] ?? '';
     _selectedBloodGroup = widget.userData?['blood_group'];
 
     _slideController = AnimationController(
@@ -55,9 +63,8 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
 
   @override
   void dispose() {
-    _patientNameCtrl.dispose();
-    _hospitalCtrl.dispose();
-    _addressCtrl.dispose();
+    _patientNameCtrl.dispose(); _hospitalCtrl.dispose();
+    _addressCtrl.dispose(); _phoneCtrl.dispose();
     _slideController.dispose();
     super.dispose();
   }
@@ -73,9 +80,9 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
       ));
       return;
     }
-    if (_selectedState.isEmpty || _selectedDistrict.isEmpty || _selectedCity.isEmpty) {
+    if (_city.isEmpty || _district.isEmpty || _state.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Please complete location selection'),
+        content: const Text('Please complete location details'),
         backgroundColor: Colors.red.shade600,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -92,9 +99,10 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
         'patient_name': _patientNameCtrl.text.trim(),
         'hospital': _hospitalCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
-        'city': _selectedCity,
-        'district': _selectedDistrict,
-        'state': _selectedState,
+        'phone': _phoneCtrl.text.trim(),
+        'city': _city,
+        'district': _district,
+        'state': _state,
         'units': _units,
         'status': 'active',
         'requester_uid': FirebaseAuth.instance.currentUser?.uid,
@@ -130,13 +138,12 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Handle bar
+          // Handle
           Container(
             margin: const EdgeInsets.only(top: 12),
             width: 40, height: 4,
             decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2)),
+                color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
           ),
 
           // Header
@@ -152,13 +159,18 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('SOS Emergency Request',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                Text('Fill details to alert nearby donors',
+                Text('Details pre-filled — edit if needed',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
               ]),
+              const Spacer(),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.grey.shade400),
+                onPressed: () => Navigator.pop(context),
+              ),
             ]),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Divider(height: 1, color: Colors.grey.shade100),
 
           // Form
@@ -199,22 +211,12 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 10),
                   Row(children: [
-                    GestureDetector(
-                      onTap: () { if (_units > 1) { setState(() => _units--); HapticFeedback.lightImpact(); } },
-                      child: Container(width: 40, height: 40,
-                          decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
-                          child: const Icon(Icons.remove, size: 20)),
-                    ),
+                    _buildUnitBtn(Icons.remove, () { if (_units > 1) setState(() => _units--); }, Colors.grey.shade100, Colors.grey.shade700),
                     const SizedBox(width: 16),
                     Text('$_units unit${_units > 1 ? 's' : ''}',
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
                     const SizedBox(width: 16),
-                    GestureDetector(
-                      onTap: () { if (_units < 10) { setState(() => _units++); HapticFeedback.lightImpact(); } },
-                      child: Container(width: 40, height: 40,
-                          decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10)),
-                          child: Icon(Icons.add, size: 20, color: Colors.red.shade600)),
-                    ),
+                    _buildUnitBtn(Icons.add, () { if (_units < 10) setState(() => _units++); }, Colors.red.shade50, Colors.red.shade600),
                   ]),
 
                   const SizedBox(height: 20),
@@ -223,6 +225,20 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
                   _buildField(controller: _patientNameCtrl, label: 'Patient Name *',
                       hint: 'Full name of patient', icon: Icons.person_outline,
                       validator: (v) => v!.isEmpty ? 'Required' : null),
+                  const SizedBox(height: 16),
+
+                  // Phone — pre-filled + editable
+                  _buildField(controller: _phoneCtrl, label: 'Contact Number *',
+                      hint: '+91 98765 43210', icon: Icons.phone_outlined,
+                      keyboardType: TextInputType.phone,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        final digits = v.replaceAll(RegExp(r'\D'), '');
+                        final number = digits.startsWith('91') && digits.length == 12
+                            ? digits.substring(2) : digits;
+                        if (number.length != 10) return 'Enter valid 10-digit number';
+                        return null;
+                      }),
                   const SizedBox(height: 16),
 
                   // Hospital
@@ -237,20 +253,60 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
                       validator: null, maxLines: 2),
                   const SizedBox(height: 20),
 
-                  // Location Picker
-                  const Text('Location *',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
-                  const SizedBox(height: 12),
-                  LocationPicker(
-                    color: Colors.red,
-                    onLocationChanged: (state, district, city) {
-                      setState(() {
-                        _selectedState = state;
-                        _selectedDistrict = district;
-                        _selectedCity = city;
-                      });
-                    },
-                  ),
+                  // Location — pre-filled display + change toggle
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('Location *',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+                    GestureDetector(
+                      onTap: () => setState(() => _changeLocation = !_changeLocation),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _changeLocation ? Colors.red.shade50 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _changeLocation ? '✕ Cancel' : '✏️ Change Location',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w500,
+                              color: _changeLocation ? Colors.red : Colors.grey.shade600),
+                        ),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+
+                  // Show pre-filled location OR picker
+                  if (!_changeLocation) ...[
+                    // Pre-filled location card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(children: [
+                        _buildLocationRow(Icons.location_city_outlined, 'City', _city),
+                        const SizedBox(height: 8),
+                        _buildLocationRow(Icons.map_outlined, 'District', _district),
+                        const SizedBox(height: 8),
+                        _buildLocationRow(Icons.flag_outlined, 'State', _state),
+                      ]),
+                    ),
+                  ] else ...[
+                    // Location picker
+                    LocationPicker(
+                      color: Colors.red,
+                      onLocationChanged: (state, district, city) {
+                        setState(() {
+                          if (state.isNotEmpty) _state = state;
+                          if (district.isNotEmpty) _district = district;
+                          if (city.isNotEmpty) { _city = city; _changeLocation = false; }
+                        });
+                      },
+                    ),
+                  ],
 
                   const SizedBox(height: 28),
 
@@ -260,8 +316,7 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
                     child: ElevatedButton(
                       onPressed: _isSending ? null : _sendSOS,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.red, foregroundColor: Colors.white,
                         disabledBackgroundColor: Colors.red.shade300,
                         elevation: 0,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -296,6 +351,27 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
     );
   }
 
+  Widget _buildUnitBtn(IconData icon, VoidCallback onTap, Color bg, Color iconColor) {
+    return GestureDetector(
+      onTap: () { HapticFeedback.lightImpact(); onTap(); },
+      child: Container(
+        width: 40, height: 40,
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+        child: Icon(icon, size: 20, color: iconColor),
+      ),
+    );
+  }
+
+  Widget _buildLocationRow(IconData icon, String label, String value) {
+    return Row(children: [
+      Icon(icon, size: 16, color: Colors.grey.shade400),
+      const SizedBox(width: 8),
+      Text('$label: ', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+      Text(value.isEmpty ? 'Not set' : value,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+    ]);
+  }
+
   Widget _buildField({
     required TextEditingController controller,
     required String label,
@@ -303,6 +379,7 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
     required IconData icon,
     required String? Function(String?)? validator,
     int maxLines = 1,
+    TextInputType keyboardType = TextInputType.text,
   }) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
@@ -311,6 +388,7 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
         controller: controller,
         maxLines: maxLines,
         validator: validator,
+        keyboardType: keyboardType,
         style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
           hintText: hint,
@@ -319,7 +397,7 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
           filled: true, fillColor: Colors.grey.shade50,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
-          focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: Colors.red, width: 1.5)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.red, width: 1.5)),
           errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade300)),
           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
