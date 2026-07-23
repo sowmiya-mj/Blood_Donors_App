@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'sos_bottom_sheet.dart';
 
 class RecipientHomeTab extends StatefulWidget {
   final Map<String, dynamic>? recipientData;
@@ -159,7 +160,35 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
               child: ScaleTransition(
                 scale: _sosActive ? const AlwaysStoppedAnimation(1.0) : _sosPulse,
                 child: GestureDetector(
-                  onTap: _sosActive ? null : _sendSOS,
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => DraggableScrollableSheet(
+                        initialChildSize: 0.85,
+                        maxChildSize: 0.95,
+                        minChildSize: 0.5,
+                        builder: (_, controller) => SOSBottomSheet(
+                          userData: widget.recipientData, // or recipientData
+                          primaryColor: widget.primaryColor,
+                          onSOSSent: () {
+                            setState(() => _sosActive = true);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: const Row(children: [
+                                Icon(Icons.check_circle, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text('SOS Alert sent to nearby donors!'),
+                              ]),
+                              backgroundColor: Colors.green.shade600,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ));
+                          },
+                        ),
+                      ),
+                    );
+                  },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 400),
                     width: double.infinity,
@@ -344,10 +373,15 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
         Icon(Icons.sos_rounded, color: Colors.red, size: 28),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('SOS • ${d['blood_group'] ?? ''} needed',
+          Text('${d['patient_name'] ?? 'Patient'} • ${d['blood_group'] ?? ''} blood',
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
-          Text('${d['city'] ?? ''} • Active',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          Text(
+            "${d['city'] ?? ''} • ${d['units'] ?? 1} unit${(d['units'] ?? 1) > 1 ? 's' : ''} needed",
+            style: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 12,
+            ),
+          ),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'sos_bottom_sheet.dart';
 
 class DonorSearchTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -76,7 +77,35 @@ class _DonorSearchTabState extends State<DonorSearchTab> with SingleTickerProvid
         const SizedBox(height: 24),
         // SOS Button
         GestureDetector(
-          onTap: _sosActive ? null : _sendSOS,
+          onTap: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => DraggableScrollableSheet(
+                initialChildSize: 0.85,
+                maxChildSize: 0.95,
+                minChildSize: 0.5,
+                builder: (_, controller) => SOSBottomSheet(
+                  userData: widget.donorData, // or recipientData
+                  primaryColor: widget.primaryColor,
+                  onSOSSent: () {
+                    setState(() => _sosActive = true);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: const Row(children: [
+                        Icon(Icons.check_circle, color: Colors.white),
+                        SizedBox(width: 8),
+                        Text('SOS Alert sent to nearby donors!'),
+                      ]),
+                      backgroundColor: Colors.green.shade600,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ));
+                  },
+                ),
+              ),
+            );
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 20),

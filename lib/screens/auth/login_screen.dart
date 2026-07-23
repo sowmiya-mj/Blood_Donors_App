@@ -5,7 +5,7 @@ import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import '../../screens/donor/donor_dashboard.dart';
 import '../../screens/recipient/recipient_dashboard.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -116,17 +116,39 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     }
     setState(() { isLoading = true; errorMessage = null; });
     try {
-      await _auth.signInWithEmailAndPassword(
+      final cred = await _auth.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text,
       );
-      // Email login success-la:
-// TODO: Navigate to role-based dashboard
+
+      // Role validation — Firestore check
+      final uid = cred.user!.uid;
+      final role = widget.role.toLowerCase();
+      final collection = role == 'donor' ? 'donors'
+          : role == 'recipient' ? 'recipients'
+          : role == 'hospital' ? 'hospitals'
+          : 'blood_banks';
+
+      final doc = await FirebaseFirestore.instance
+          .collection(collection)
+          .doc(uid)
+          .get();
+
+      if (!doc.exists) {
+        // Wrong role — logout பண்ணிட்டு error காட்டு
+        await FirebaseAuth.instance.signOut();
+        setState(() => errorMessage =
+        'No ${widget.role} account found for this email.\nPlease register as ${widget.role} first.');
+        _triggerShake();
+        return;
+      }
+
+      // Correct role — navigate
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => widget.role.toLowerCase() == 'donor'
+            builder: (_) => role == 'donor'
                 ? const DonorDashboard()
                 : const RecipientDashboard(),
           ),

@@ -198,29 +198,66 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                   }
                   return Column(children: snapshot.data!.docs.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
+                    final isMyRequest = data['requester_uid'] ==
+                        FirebaseAuth.instance.currentUser?.uid;
                     return ScaleTransition(scale: _sosPulse, child: Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(14),
+                      decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: Colors.red.shade200)),
                       child: Row(children: [
                         Container(padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
+                            decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.1),
+                                shape: BoxShape.circle),
                             child: Text(data['blood_group'] ?? 'O+',
-                                style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13))),
+                                style: TextStyle(color: color,
+                                    fontWeight: FontWeight.bold, fontSize: 13))),
                         const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(data['patient_name'] ?? 'Patient',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                          Text('${data['city'] ?? ''} • ${data['units'] ?? '1'} unit needed',
-                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(
+                            "${data['patient_name'] ?? 'Patient'} (${data['blood_group'] ?? 'N/A'} blood) ",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            "${data['city'] ?? ''} • ${data['units'] ?? 1} unit${(data['units'] ?? 1) > 1 ? 's' : ''} needed",
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                            ),
+                          ),
                         ])),
-                        ElevatedButton(onPressed: () {},
-                            style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                            child: const Text('Help', style: TextStyle(fontSize: 12))),
+                        isMyRequest
+                            ? Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(8)),
+                            child: Text('Active',
+                                style: TextStyle(
+                                    color: Colors.orange.shade700,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600)))
+                            : ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: color,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                            child: const Text('Help',
+                                style: TextStyle(fontSize: 12))),
                       ]),
                     ));
                   }).toList());
