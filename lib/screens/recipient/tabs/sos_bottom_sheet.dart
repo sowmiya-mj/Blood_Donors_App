@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../widgets/location_picker.dart'; // adjust path
+import '../../../widgets/location_picker.dart';
 
 class SOSBottomSheet extends StatefulWidget {
   final Map<String, dynamic>? userData;
