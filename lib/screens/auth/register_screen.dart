@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../widgets/location_picker.dart';
+import '../donor/donor_dashboard.dart';
+import '../recipient/recipient_dashboard.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String role;
@@ -257,8 +259,27 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       }
 
       setState(() => successMessage = 'Account created successfully! 🎉');
-      await Future.delayed(const Duration(seconds: 1));
-      if (mounted) Navigator.pop(context); // TODO: → Dashboard
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (_) {
+              switch (widget.role.toLowerCase()) {
+                case 'donor':
+                  return const DonorDashboard();
+                case 'recipient':
+                  return const RecipientDashboard();
+              // Hospital & Blood Bank dashboard later add பண்ணலாம்
+                default:
+                  return const DonorDashboard();
+              }
+            },
+          ),
+              (route) => false,
+        );
+      }
 
     } on FirebaseAuthException catch (e) {
       setState(() {

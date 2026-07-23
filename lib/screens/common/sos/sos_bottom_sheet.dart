@@ -24,7 +24,8 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   bool _isSending = false;
-  bool _changeLocation = false; // toggle to show location picker
+  bool _changeLocation = false;
+  bool _editingCity = false;
 
   String? _selectedBloodGroup;
   final _patientNameCtrl = TextEditingController();
@@ -253,56 +254,93 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
                       validator: null, maxLines: 2),
                   const SizedBox(height: 20),
 
-                  // Location — pre-filled display + change toggle
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    const Text('Location *',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
-                    GestureDetector(
-                      onTap: () => setState(() => _changeLocation = !_changeLocation),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _changeLocation ? Colors.red.shade50 : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          _changeLocation ? '✕ Cancel' : '✏️ Change Location',
-                          style: TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.w500,
-                              color: _changeLocation ? Colors.red : Colors.grey.shade600),
-                        ),
-                      ),
-                    ),
-                  ]),
+                  // Location section
+                  const Text('Location *',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 10),
 
-                  // Show pre-filled location OR picker
-                  if (!_changeLocation) ...[
-                    // Pre-filled location card
-                    Container(
-                      padding: const EdgeInsets.all(14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+                      // State — display only (from location picker below)
+                      _buildLocationRow(Icons.flag_outlined, 'State', _state),
+                      const SizedBox(height: 8),
+                      _buildLocationRow(Icons.map_outlined, 'District', _district),
+                      const SizedBox(height: 10),
+
+                      // City — with edit icon
+                      Row(children: [
+                        Icon(Icons.location_city_outlined, size: 16, color: Colors.grey.shade400),
+                        const SizedBox(width: 8),
+                        Text('City: ', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                        _editingCity
+                            ? Expanded(child: TextField(
+                          autofocus: true,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E)),
+                          decoration: InputDecoration(
+                            hintText: 'Type city name',
+                            hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                            isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.red)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.red, width: 1.5)),
+                          ),
+                          onChanged: (v) => setState(() => _city = v),
+                          onSubmitted: (_) => setState(() => _editingCity = false),
+                        ))
+                            : Expanded(child: Text(_city.isEmpty ? 'Not set' : _city,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E)))),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => setState(() => _editingCity = !_editingCity),
+                          child: Icon(_editingCity ? Icons.check_rounded : Icons.edit_rounded,
+                              size: 16, color: _editingCity ? Colors.green : Colors.red.shade400),
+                        ),
+                      ]),
+                    ]),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Change State/District via picker
+                  GestureDetector(
+                    onTap: () => setState(() => _changeLocation = !_changeLocation),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
+                        color: _changeLocation ? Colors.red.shade50 : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: _changeLocation ? Colors.red.shade200 : Colors.grey.shade200),
                       ),
-                      child: Column(children: [
-                        _buildLocationRow(Icons.location_city_outlined, 'City', _city),
-                        const SizedBox(height: 8),
-                        _buildLocationRow(Icons.map_outlined, 'District', _district),
-                        const SizedBox(height: 8),
-                        _buildLocationRow(Icons.flag_outlined, 'State', _state),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(_changeLocation ? Icons.close_rounded : Icons.swap_horiz_rounded,
+                            size: 14, color: _changeLocation ? Colors.red : Colors.grey.shade600),
+                        const SizedBox(width: 6),
+                        Text(_changeLocation ? 'Cancel' : 'Change State / District',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                                color: _changeLocation ? Colors.red : Colors.grey.shade600)),
                       ]),
                     ),
-                  ] else ...[
-                    // Location picker
+                  ),
+
+                  if (_changeLocation) ...[
+                    const SizedBox(height: 12),
                     LocationPicker(
                       color: Colors.red,
                       onLocationChanged: (state, district, city) {
                         setState(() {
                           if (state.isNotEmpty) _state = state;
                           if (district.isNotEmpty) _district = district;
-                          if (city.isNotEmpty) { _city = city; _changeLocation = false; }
+                          // City from picker auto-fills too
+                          if (city.isNotEmpty) {
+                            _city = city;
+                            _changeLocation = false;
+                          }
                         });
                       },
                     ),
