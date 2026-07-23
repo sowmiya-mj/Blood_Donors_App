@@ -385,8 +385,12 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(8)),
-          child: const Text('Active', style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.w600)),
+          decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+          child:  Text('Active',
+              style: TextStyle(
+                  color: Colors.orange.shade700,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600)),
         ),
       ]),
     );
