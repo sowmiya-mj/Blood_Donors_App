@@ -145,7 +145,7 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
               const SizedBox(width: 12),
               _buildStatCard('$_displayLives', 'Lives Helped', Icons.people_rounded, Colors.orange),
               const SizedBox(width: 12),
-              _buildStatCard('O+', 'Compatible', Icons.bloodtype, Colors.purple),
+              _buildCompatibleCard(bloodGroup),
             ]),
           )),
           const SizedBox(height: 20),
@@ -203,61 +203,35 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                     return ScaleTransition(scale: _sosPulse, child: Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                          color: Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(14),
+                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: Colors.red.shade200)),
                       child: Row(children: [
                         Container(padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                                color: color.withValues(alpha: 0.1),
-                                shape: BoxShape.circle),
+                            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
                             child: Text(data['blood_group'] ?? 'O+',
-                                style: TextStyle(color: color,
-                                    fontWeight: FontWeight.bold, fontSize: 13))),
+                                style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13))),
                         const SizedBox(width: 12),
-                        Expanded(child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(
-                            "${data['patient_name'] ?? 'Patient'} (${data['blood_group'] ?? 'N/A'} blood) ",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                          Text(
-                            "${data['city'] ?? ''} • ${data['units'] ?? 1} unit${(data['units'] ?? 1) > 1 ? 's' : ''} needed",
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 12,
-                            ),
-                          ),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(data['patient_name'] ?? 'Patient',
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text('${data['city'] ?? ''} • ${data['units'] ?? '1'} unit needed',
+                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                         ])),
                         isMyRequest
                             ? Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
                                 color: Colors.orange.shade50,
                                 borderRadius: BorderRadius.circular(8)),
                             child: Text('Active',
-                                style: TextStyle(
-                                    color: Colors.orange.shade700,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600)))
-                            : ElevatedButton(
-                            onPressed: () {},
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: color,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                            child: const Text('Help',
-                                style: TextStyle(fontSize: 12))),
+                                style: TextStyle(color: Colors.orange.shade700,
+                                    fontSize: 11, fontWeight: FontWeight.w600)))
+                            : ElevatedButton(onPressed: () {},
+                            style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                            child: const Text('Help', style: TextStyle(fontSize: 12))),
                       ]),
                     ));
                   }).toList());
@@ -303,6 +277,143 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
     ));
   }
 
+  List<String> _getCompatibleTypes(String bloodGroup) {
+    switch (bloodGroup) {
+      case 'O-': return ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
+      case 'O+': return ['O+', 'A+', 'B+', 'AB+'];
+      case 'A-': return ['A-', 'A+', 'AB-', 'AB+'];
+      case 'A+': return ['A+', 'AB+'];
+      case 'B-': return ['B-', 'B+', 'AB-', 'AB+'];
+      case 'B+': return ['B+', 'AB+'];
+      case 'AB-': return ['AB-', 'AB+'];
+      case 'AB+': return ['AB+'];
+      default: return [];
+    }
+  }
+
+  List<String> _getCanReceiveFrom(String bloodGroup) {
+    switch (bloodGroup) {
+      case 'O-': return ['O-'];
+      case 'O+': return ['O-', 'O+'];
+      case 'A-': return ['O-', 'A-'];
+      case 'A+': return ['O-', 'O+', 'A-', 'A+'];
+      case 'B-': return ['O-', 'B-'];
+      case 'B+': return ['O-', 'O+', 'B-', 'B+'];
+      case 'AB-': return ['O-', 'A-', 'B-', 'AB-'];
+      case 'AB+': return ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
+      default: return [];
+    }
+  }
+
+  Widget _buildCompatibleCard(String bloodGroup) {
+    final types = _getCompatibleTypes(bloodGroup);
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _showCompatibilitySheet(bloodGroup),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [BoxShadow(
+                color: Colors.purple.withValues(alpha: 0.1),
+                blurRadius: 10, offset: const Offset(0, 4))],
+          ),
+          child: Column(children: [
+            Icon(Icons.bloodtype, color: Colors.purple, size: 22),
+            const SizedBox(height: 6),
+            Text('${types.length}', style: const TextStyle(
+                fontSize: 20, fontWeight: FontWeight.bold, color: Colors.purple)),
+            Text('Can Donate To', textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _showCompatibilitySheet(String bloodGroup) {
+    final donateTo = _getCompatibleTypes(bloodGroup);
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.purple.shade50, shape: BoxShape.circle),
+                    child: Icon(Icons.bloodtype, color: Colors.purple.shade600, size: 24)),
+                const SizedBox(width: 12),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Blood Compatibility',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+                  Text('Your blood group: $bloodGroup',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+                ]),
+              ]),
+              const SizedBox(height: 20),
+              Text('You can donate to:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10, children: donateTo.map((g) =>
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.purple.shade200)),
+                    child: Text(g, style: TextStyle(
+                        color: Colors.purple.shade700, fontWeight: FontWeight.bold, fontSize: 14)),
+                  )).toList()),
+              const SizedBox(height: 24),
+              if (bloodGroup == 'O-')
+                Container(padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      Icon(Icons.star_rounded, color: Colors.red.shade400, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text('You are a Universal Donor! Your blood can save anyone.',
+                          style: TextStyle(color: Colors.red.shade700, fontSize: 12, fontWeight: FontWeight.w500))),
+                    ])),
+              if (bloodGroup == 'AB+')
+                Container(padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      Icon(Icons.star_rounded, color: Colors.blue.shade400, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text('You are a Universal Recipient! You can receive blood from anyone.',
+                          style: TextStyle(color: Colors.blue.shade700, fontSize: 12, fontWeight: FontWeight.w500))),
+                    ])),
+              const SizedBox(height: 20),
+              Text('You can receive from:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10,
+                  children: _getCanReceiveFrom(bloodGroup).map((g) =>
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.green.shade200)),
+                        child: Text(g, style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14)),
+                      )).toList()),
+            ]),
+      ),
+
+    );
+
+
+  }
+
+
+
   Widget _buildActionButton(IconData icon, String label, Color color, VoidCallback onTap) {
     return Expanded(child: GestureDetector(
       onTap: () { HapticFeedback.lightImpact(); onTap(); },
@@ -319,4 +430,3 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
     ));
   }
 }
-
