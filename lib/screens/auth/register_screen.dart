@@ -32,31 +32,24 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   String? successMessage;
   bool obscurePassword = true;
   bool obscureConfirm = true;
-  bool alsoRecipient = false; // multi-role checkbox
+  bool alsoRecipient = false;
 
-  // Common controllers
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmPasswordCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-
-  // Donor / Recipient
   final _nameCtrl = TextEditingController();
-  DateTime? _selectedDOB;
-  String? _selectedBloodGroup;
-
-  // Hospital / Blood Bank
   final _orgNameCtrl = TextEditingController();
   final _licenseCtrl = TextEditingController();
 
-  // Location
+  DateTime? _selectedDOB;
+  String? _selectedBloodGroup;
   String _selectedState = '';
   String _selectedDistrict = '';
   String _selectedCity = '';
 
   final List<String> _bloodGroups = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
-  // Animations
   late AnimationController _fadeController;
   late AnimationController _heartController;
   late AnimationController _shakeController;
@@ -80,9 +73,11 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     _shakeAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn));
     _fadeController.forward();
 
-    // Pre-fill Google Sign In data
-    if (widget.prefillName.isNotEmpty) _nameCtrl.text = widget.prefillName;
-    if (widget.prefillName.isNotEmpty) _orgNameCtrl.text = widget.prefillName;
+    // Pre-fill Google data
+    if (widget.prefillName.isNotEmpty) {
+      _nameCtrl.text = widget.prefillName;
+      _orgNameCtrl.text = widget.prefillName;
+    }
     if (widget.prefillEmail.isNotEmpty) _emailCtrl.text = widget.prefillEmail;
   }
 
@@ -140,24 +135,21 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       firstDate: DateTime(1920),
       lastDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
       builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: _roleColor)),
-        child: child!,
-      ),
+          data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: _roleColor)),
+          child: child!),
     );
     if (picked != null) setState(() => _selectedDOB = picked);
   }
 
-  // Strong password validator
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) return 'Required';
     if (value.length < 8) return 'Min 8 characters';
     if (!value.contains(RegExp(r'[A-Z]'))) return 'Add at least 1 uppercase letter';
     if (!value.contains(RegExp(r'[0-9]'))) return 'Add at least 1 number';
-    if (!value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'))) return 'Add at least 1 special character (!@#\$...)';
+    if (!value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'))) return 'Add at least 1 special character';
     return null;
   }
 
-  // Password strength indicator
   double _passwordStrength(String password) {
     double strength = 0;
     if (password.length >= 8) strength += 0.25;
@@ -167,26 +159,48 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     return strength;
   }
 
-  Color _strengthColor(double strength) {
-    if (strength <= 0.25) return Colors.red;
-    if (strength <= 0.5) return Colors.orange;
-    if (strength <= 0.75) return Colors.yellow.shade700;
+  Color _strengthColor(double s) {
+    if (s <= 0.25) return Colors.red;
+    if (s <= 0.5) return Colors.orange;
+    if (s <= 0.75) return Colors.yellow.shade700;
     return Colors.green;
   }
 
-  String _strengthLabel(double strength) {
-    if (strength <= 0.25) return 'Weak';
-    if (strength <= 0.5) return 'Fair';
-    if (strength <= 0.75) return 'Good';
+  String _strengthLabel(double s) {
+    if (s <= 0.25) return 'Weak';
+    if (s <= 0.5) return 'Fair';
+    if (s <= 0.75) return 'Good';
     return 'Strong';
+  }
+
+  // Check if this email is already registered under a DIFFERENT role
+  Future<String?> _checkExistingRole(String uid) async {
+    final collections = {
+      'donors': 'Donor',
+      'recipients': 'Recipient',
+      'hospitals': 'Hospital',
+      'blood_banks': 'Blood Bank',
+    };
+    final currentCollection = widget.role.toLowerCase() == 'donor' ? 'donors'
+        : widget.role.toLowerCase() == 'recipient' ? 'recipients'
+        : widget.role.toLowerCase() == 'hospital' ? 'hospitals' : 'blood_banks';
+
+    for (final entry in collections.entries) {
+      if (entry.key == currentCollection) continue;
+      final doc = await _db.collection(entry.key).doc(uid).get();
+      if (doc.exists) return entry.value;
+    }
+    return null;
   }
 
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) { _triggerShake(); return; }
-    if (_passwordCtrl.text != _confirmPasswordCtrl.text) {
+
+    if (!widget.isGoogleSignIn && _passwordCtrl.text != _confirmPasswordCtrl.text) {
       setState(() => errorMessage = 'Passwords do not match');
       _triggerShake(); return;
     }
+
     final role = widget.role.toLowerCase();
     if ((role == 'donor' || role == 'recipient') && _selectedBloodGroup == null) {
       setState(() => errorMessage = 'Please select your blood group');
@@ -205,10 +219,33 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
 
     try {
       String uid;
+
       if (widget.isGoogleSignIn) {
-        // Already authenticated via Google — just get current user uid
+        // Already authenticated via Google
         uid = _auth.currentUser!.uid;
+
+        // Check if this Google account is already registered under a different role
+        final existingRole = await _checkExistingRole(uid);
+        if (existingRole != null) {
+          setState(() => errorMessage =
+          'This Google account is already registered as $existingRole.\n'
+              'Please use a different account or login as $existingRole.');
+          _triggerShake();
+          return;
+        }
+
+        // Check if already registered in THIS role
+        final currentCol = role == 'donor' ? 'donors'
+            : role == 'recipient' ? 'recipients'
+            : role == 'hospital' ? 'hospitals' : 'blood_banks';
+        final existingDoc = await _db.collection(currentCol).doc(uid).get();
+        if (existingDoc.exists) {
+          setState(() => errorMessage = 'This Google account is already registered as ${widget.role}. Please login instead.');
+          _triggerShake();
+          return;
+        }
       } else {
+        // Email/Password registration
         final cred = await _auth.createUserWithEmailAndPassword(
           email: _emailCtrl.text.trim(),
           password: _passwordCtrl.text,
@@ -216,7 +253,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
         uid = cred.user!.uid;
       }
 
-      // Base user data
       final baseData = {
         'uid': uid,
         'email': _emailCtrl.text.trim(),
@@ -238,7 +274,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             'role': 'donor',
             'is_available': true,
           });
-          // Multi-role: also register as recipient if checked
           if (alsoRecipient) {
             await _db.collection('recipients').doc(uid).set({
               ...baseData,
@@ -248,7 +283,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             });
           }
           break;
-
         case 'recipient':
           await _db.collection('recipients').doc(uid).set({
             ...baseData,
@@ -257,7 +291,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             'role': 'recipient',
           });
           break;
-
         case 'hospital':
           await _db.collection('hospitals').doc(uid).set({
             ...baseData,
@@ -267,7 +300,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             'verified': false,
           });
           break;
-
         case 'blood bank':
           await _db.collection('blood_banks').doc(uid).set({
             ...baseData,
@@ -280,23 +312,18 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       }
 
       setState(() => successMessage = 'Account created successfully! 🎉');
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 800));
+
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(
-            builder: (_) {
-              switch (widget.role.toLowerCase()) {
-                case 'donor':
-                  return const DonorDashboard();
-                case 'recipient':
-                  return const RecipientDashboard();
-              // Hospital & Blood Bank dashboard later add பண்ணலாம்
-                default:
-                  return const DonorDashboard();
-              }
-            },
-          ),
+          MaterialPageRoute(builder: (_) {
+            switch (role) {
+              case 'donor': return const DonorDashboard();
+              case 'recipient': return const RecipientDashboard();
+              default: return const DonorDashboard();
+            }
+          }),
               (route) => false,
         );
       }
@@ -381,8 +408,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   }
 
   Widget _buildFormPanel(Color color) {
-    final passwordValue = _passwordCtrl.text;
-    final strength = _passwordStrength(passwordValue);
+    final strength = _passwordStrength(_passwordCtrl.text);
 
     return AnimatedBuilder(
       animation: _fadeAnim,
@@ -404,50 +430,54 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             Text('Already have an account? ', style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
             GestureDetector(
               onTap: () => Navigator.pop(context),
-              child: Text('Login here', style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: color)),
+              child: Text('Login here', style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline, decorationColor: color)),
             ),
           ]),
+
+          // Google Sign In banner
+          if (widget.isGoogleSignIn) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                  color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200)),
+              child: Row(children: [
+                const Text('G', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF4285F4))),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Signed in with Google', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.blue.shade700)),
+                  Text('Complete your ${widget.role} profile below', style: TextStyle(fontSize: 11, color: Colors.blue.shade500)),
+                ])),
+                Icon(Icons.verified_rounded, color: Colors.blue.shade400, size: 20),
+              ]),
+            ),
+          ],
+
           const SizedBox(height: 28),
 
           // Role-specific fields
           ..._buildRoleFields(color),
           const SizedBox(height: 16),
 
-          // Common fields
-          // Email — locked for Google Sign In users
+          // Email — locked for Google, editable for email/password
           if (widget.isGoogleSignIn)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade200)),
-              child: Row(children: [
-                Icon(Icons.email_outlined, color: Colors.grey.shade400, size: 20),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Email address', style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
-                  Text(_emailCtrl.text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
-                ])),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
-                    child: Row(children: [
-                      Icon(Icons.verified_rounded, size: 12, color: Colors.green.shade600),
-                      const SizedBox(width: 4),
-                      Text('Google', style: TextStyle(fontSize: 11, color: Colors.green.shade600, fontWeight: FontWeight.w600)),
-                    ])),
-              ]),
-            )
+            _buildLockedEmailField(color)
           else
-            _buildField(controller: _emailCtrl, label: 'Email address', hint: 'you@example.com', icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress,
+            _buildField(controller: _emailCtrl, label: 'Email address', hint: 'you@example.com',
+                icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress,
                 validator: (v) => v!.isEmpty ? 'Required' : !v.contains('@') || !v.contains('.') ? 'Enter a valid email' : null),
+
           const SizedBox(height: 16),
-          _buildField(controller: _phoneCtrl, label: 'Phone number', hint: '+91 98765 43210', icon: Icons.phone_outlined, color: color, keyboardType: TextInputType.phone,
+
+          _buildField(controller: _phoneCtrl, label: 'Phone number', hint: '+91 98765 43210',
+              icon: Icons.phone_outlined, color: color, keyboardType: TextInputType.phone,
               validator: (v) {
                 if (v == null || v.isEmpty) return 'Required';
                 final digits = v.replaceAll(RegExp(r'\D'), '');
                 final number = digits.startsWith('91') && digits.length == 12 ? digits.substring(2) : digits;
-                if (number.length != 10) return 'Enter valid 10-digit number';
+                if (number.length != 10) return 'Enter valid 10-digit mobile number';
                 return null;
               }),
           const SizedBox(height: 16),
@@ -461,10 +491,13 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
           ),
           const SizedBox(height: 16),
 
-          // Password — hide for Google Sign In users
+          // Password — hidden for Google Sign In
           if (!widget.isGoogleSignIn) ...[
-            _buildField(controller: _passwordCtrl, label: 'Password', hint: 'Min 8 chars, uppercase, number, symbol', icon: Icons.lock_outline, color: color,
-                isPassword: true, isObscure: obscurePassword, onToggle: () => setState(() => obscurePassword = !obscurePassword),
+            _buildField(controller: _passwordCtrl, label: 'Password',
+                hint: 'Min 8 chars, uppercase, number, symbol',
+                icon: Icons.lock_outline, color: color,
+                isPassword: true, isObscure: obscurePassword,
+                onToggle: () => setState(() => obscurePassword = !obscurePassword),
                 validator: _validatePassword,
                 onChanged: (_) => setState(() {})),
             if (_passwordCtrl.text.isNotEmpty) ...[
@@ -478,8 +511,10 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               ]),
             ],
             const SizedBox(height: 16),
-            _buildField(controller: _confirmPasswordCtrl, label: 'Confirm Password', hint: '••••••••', icon: Icons.lock_outline, color: color,
-                isPassword: true, isObscure: obscureConfirm, onToggle: () => setState(() => obscureConfirm = !obscureConfirm),
+            _buildField(controller: _confirmPasswordCtrl, label: 'Confirm Password', hint: '••••••••',
+                icon: Icons.lock_outline, color: color,
+                isPassword: true, isObscure: obscureConfirm,
+                onToggle: () => setState(() => obscureConfirm = !obscureConfirm),
                 validator: (v) => v!.isEmpty ? 'Required' : v != _passwordCtrl.text ? 'Passwords do not match' : null),
           ],
 
@@ -488,16 +523,16 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: color.withValues(alpha: 0.2)),
-              ),
+                  color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: color.withValues(alpha: 0.2))),
               child: CheckboxListTile(
                 value: alsoRecipient,
                 onChanged: (val) => setState(() => alsoRecipient = val ?? false),
                 activeColor: color,
-                title: Text('I also want to register as Recipient', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: const Color(0xFF1A1A2E))),
-                subtitle: Text('You can both donate and request blood', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                title: Text('I also want to register as Recipient',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: const Color(0xFF1A1A2E))),
+                subtitle: Text('You can both donate and request blood',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -505,7 +540,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             ),
           ],
 
-          // Error / Success
           if (errorMessage != null) ...[
             const SizedBox(height: 12),
             _buildMessageBox(errorMessage!, isError: true),
@@ -538,17 +572,44 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     );
   }
 
+  // Locked email field for Google Sign In users
+  Widget _buildLockedEmailField(Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+          color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200)),
+      child: Row(children: [
+        Icon(Icons.email_outlined, color: Colors.grey.shade400, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Email address', style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 2),
+          Text(_emailCtrl.text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+        ])),
+        Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              Icon(Icons.verified_rounded, size: 12, color: Colors.green.shade600),
+              const SizedBox(width: 4),
+              Text('Google', style: TextStyle(fontSize: 11, color: Colors.green.shade600, fontWeight: FontWeight.w600)),
+            ])),
+      ]),
+    );
+  }
+
   List<Widget> _buildRoleFields(Color color) {
     final role = widget.role.toLowerCase();
     switch (role) {
       case 'donor':
       case 'recipient':
         return [
-          _buildField(controller: _nameCtrl, label: 'Full Name', hint: 'Your full name', icon: Icons.person_outline, color: color,
+          _buildField(controller: _nameCtrl, label: 'Full Name', hint: 'Your full name',
+              icon: Icons.person_outline, color: color,
               validator: (v) => v!.isEmpty ? 'Required' : null),
           const SizedBox(height: 16),
           if (role == 'donor') ...[
-            // DOB Picker
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Date of Birth', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 8),
@@ -563,11 +624,10 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                     Icon(Icons.cake_outlined, color: Colors.grey.shade400, size: 20),
                     const SizedBox(width: 12),
                     Expanded(child: Text(
-                      _selectedDOB != null
-                          ? '${DateFormat('dd MMM yyyy').format(_selectedDOB!)}  •  Age: ${_calculateAge(_selectedDOB!)} yrs'
-                          : 'Select date of birth (must be 18+)',
-                      style: TextStyle(fontSize: 14, color: _selectedDOB != null ? const Color(0xFF1A1A2E) : Colors.grey.shade400),
-                    )),
+                        _selectedDOB != null
+                            ? '${DateFormat('dd MMM yyyy').format(_selectedDOB!)}  •  Age: ${_calculateAge(_selectedDOB!)} yrs'
+                            : 'Select date of birth (must be 18+)',
+                        style: TextStyle(fontSize: 14, color: _selectedDOB != null ? const Color(0xFF1A1A2E) : Colors.grey.shade400))),
                     Icon(Icons.calendar_today_outlined, color: color, size: 18),
                   ]),
                 ),
@@ -577,7 +637,6 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
           ],
           _buildBloodGroupPicker(color),
         ];
-
       case 'hospital':
       case 'blood bank':
         return [
@@ -588,10 +647,10 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               icon: Icons.business_outlined, color: color,
               validator: (v) => v!.isEmpty ? 'Required' : null),
           const SizedBox(height: 16),
-          _buildField(controller: _licenseCtrl, label: 'License Number', hint: 'LIC-2024-XXXXX', icon: Icons.badge_outlined, color: color,
+          _buildField(controller: _licenseCtrl, label: 'License Number', hint: 'LIC-2024-XXXXX',
+              icon: Icons.badge_outlined, color: color,
               validator: (v) => v!.isEmpty ? 'Required' : null),
         ];
-
       default: return [];
     }
   }
@@ -605,16 +664,14 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
         return GestureDetector(
           onTap: () => setState(() => _selectedBloodGroup = group),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 58, height: 42,
-            decoration: BoxDecoration(
-              color: selected ? color : Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: selected ? color : Colors.grey.shade200, width: selected ? 2 : 1),
-            ),
-            child: Center(child: Text(group, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
-                color: selected ? Colors.white : Colors.grey.shade700))),
-          ),
+              duration: const Duration(milliseconds: 200),
+              width: 58, height: 42,
+              decoration: BoxDecoration(
+                  color: selected ? color : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: selected ? color : Colors.grey.shade200, width: selected ? 2 : 1)),
+              child: Center(child: Text(group, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : Colors.grey.shade700)))),
         );
       }).toList()),
     ]);
@@ -664,7 +721,8 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
           prefixIcon: Icon(icon, color: Colors.grey.shade400, size: 20),
           suffixIcon: isPassword ? IconButton(
-              icon: Icon(isObscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: Colors.grey.shade400, size: 20),
+              icon: Icon(isObscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: Colors.grey.shade400, size: 20),
               onPressed: onToggle) : null,
           filled: true, fillColor: Colors.grey.shade50,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
