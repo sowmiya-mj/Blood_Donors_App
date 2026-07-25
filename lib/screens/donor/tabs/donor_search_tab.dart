@@ -1,5 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
@@ -14,32 +15,30 @@ class DonorSearchTab extends StatefulWidget {
 
 class _DonorSearchTabState extends State<DonorSearchTab>
     with SingleTickerProviderStateMixin {
+
+  // Search mode: 0=Donors, 1=Blood Banks, 2=Hospitals
+  int _searchMode = 0;
+
   String? _selectedBloodGroup;
   bool _isSearching = false;
   bool _sosActive = false;
+  bool _showFilters = false;
   List<Map<String, dynamic>> _results = [];
 
-  // Location filters
+  // Location filters from JSON
+  Map<String, dynamic> _locationData = {};
+  List<String> _states = [];
+  List<String> _districts = [];
+
   String? _filterState;
   String? _filterDistrict;
-  String? _filterCity;
-  bool _showFilters = false;
+  final TextEditingController _cityCtrl = TextEditingController();
+  bool _loadingLocation = true;
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
 
-  final TextEditingController _cityCtrl = TextEditingController();
   final List<String> _bloodGroups = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
-
-  // India states for filter dropdown
-  final List<String> _states = [
-    'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh',
-    'Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka',
-    'Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram',
-    'Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana',
-    'Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Chandigarh',
-    'Puducherry','Jammu and Kashmir','Ladakh',
-  ];
 
   @override
   void initState() {
@@ -47,6 +46,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
     _fadeController.forward();
+    _loadLocationData();
   }
 
   @override
@@ -56,8 +56,36 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     super.dispose();
   }
 
+  Future<void> _loadLocationData() async {
+    try {
+      final String data = await rootBundle.loadString('assets/data/india_locations.json');
+      final Map<String, dynamic> json = jsonDecode(data);
+      setState(() {
+        _locationData = json;
+        _states = json.keys.toList()..sort();
+        _loadingLocation = false;
+      });
+    } catch (_) {
+      setState(() => _loadingLocation = false);
+    }
+  }
+
+  void _onStateChanged(String? state) {
+    setState(() {
+      _filterState = state;
+      _filterDistrict = null;
+      _cityCtrl.clear();
+      if (state != null) {
+        final stateData = _locationData[state] as Map<String, dynamic>? ?? {};
+        _districts = stateData.keys.toList()..sort();
+      } else {
+        _districts = [];
+      }
+    });
+  }
+
   Future<void> _searchDonors() async {
-    if (_selectedBloodGroup == null) {
+    if (_searchMode == 0 && _selectedBloodGroup == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: const Text('Please select a blood group'),
           backgroundColor: Colors.red.shade600,
@@ -69,39 +97,63 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     setState(() { _isSearching = true; _results = []; });
 
     try {
-      Query query = FirebaseFirestore.instance
-          .collection('donors')
-          .where('blood_group', isEqualTo: _selectedBloodGroup)
-          .where('is_available', isEqualTo: true);
+      if (_searchMode == 0) {
+        // Search donors — case insensitive via Firestore range query
+        Query query = FirebaseFirestore.instance
+            .collection('donors')
+            .where('is_available', isEqualTo: true);
 
-      // Location filters
-      if (_filterState != null && _filterState!.isNotEmpty) {
-        query = query.where('state', isEqualTo: _filterState);
-      }
-      if (_filterDistrict != null && _filterDistrict!.isNotEmpty) {
-        query = query.where('district', isEqualTo: _filterDistrict);
-      }
-      if (_cityCtrl.text.trim().isNotEmpty) {
-        query = query.where('city', isEqualTo: _cityCtrl.text.trim());
-      }
+        if (_selectedBloodGroup != null) {
+          query = query.where('blood_group', isEqualTo: _selectedBloodGroup);
+        }
+        if (_filterState != null) query = query.where('state', isEqualTo: _filterState);
+        if (_filterDistrict != null) query = query.where('district', isEqualTo: _filterDistrict);
 
-      final snap = await query.limit(20).get();
-      setState(() {
-        _results = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
-      });
+        final snap = await query.limit(50).get();
+        var results = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+
+        // City filter — case insensitive client side
+        if (_cityCtrl.text.trim().isNotEmpty) {
+          final cityQuery = _cityCtrl.text.trim().toLowerCase();
+          results = results.where((d) =>
+              (d['city'] as String? ?? '').toLowerCase().contains(cityQuery)
+          ).toList();
+        }
+
+        setState(() => _results = results);
+
+      } else {
+        // Search blood banks or hospitals
+        final collection = _searchMode == 1 ? 'blood_banks' : 'hospitals';
+        Query query = FirebaseFirestore.instance.collection(collection);
+
+        if (_filterState != null) query = query.where('state', isEqualTo: _filterState);
+        if (_filterDistrict != null) query = query.where('district', isEqualTo: _filterDistrict);
+
+        final snap = await query.limit(50).get();
+        var results = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+
+        // City filter — case insensitive
+        if (_cityCtrl.text.trim().isNotEmpty) {
+          final cityQuery = _cityCtrl.text.trim().toLowerCase();
+          results = results.where((d) =>
+              (d['city'] as String? ?? '').toLowerCase().contains(cityQuery)
+          ).toList();
+        }
+
+        setState(() => _results = results);
+      }
     } catch (_) {} finally {
       setState(() => _isSearching = false);
     }
   }
 
-  void _clearFilters() {
-    setState(() {
-      _filterState = null;
-      _filterDistrict = null;
-      _filterCity = null;
-      _cityCtrl.clear();
-    });
-  }
+  void _clearFilters() => setState(() {
+    _filterState = null;
+    _filterDistrict = null;
+    _districts = [];
+    _cityCtrl.clear();
+  });
 
   bool get _hasActiveFilters =>
       _filterState != null || _filterDistrict != null || _cityCtrl.text.isNotEmpty;
@@ -121,9 +173,9 @@ class _DonorSearchTabState extends State<DonorSearchTab>
             const Text('Search & Request',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
             const SizedBox(height: 4),
-            Text('Find donors or send emergency SOS',
+            Text('Find donors, blood banks or send SOS',
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
             // SOS Button
             GestureDetector(
@@ -134,7 +186,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                   backgroundColor: Colors.transparent,
                   builder: (_) => DraggableScrollableSheet(
                     initialChildSize: 0.85, maxChildSize: 0.95, minChildSize: 0.5,
-                    builder: (_, controller) => SOSBottomSheet(
+                    builder: (_, __) => SOSBottomSheet(
                       userData: widget.donorData,
                       primaryColor: widget.primaryColor,
                       onSOSSent: () => setState(() => _sosActive = true),
@@ -145,7 +197,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 20),
+                padding: const EdgeInsets.symmetric(vertical: 18),
                 decoration: BoxDecoration(
                     gradient: LinearGradient(colors: _sosActive
                         ? [Colors.grey.shade400, Colors.grey.shade300]
@@ -154,156 +206,179 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                     boxShadow: _sosActive ? [] : [
                       BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 15, offset: const Offset(0, 6))]),
                 child: Column(children: [
-                  Icon(Icons.sos_rounded, color: Colors.white, size: 40),
-                  const SizedBox(height: 8),
+                  Icon(Icons.sos_rounded, color: Colors.white, size: 36),
+                  const SizedBox(height: 6),
                   Text(_sosActive ? 'SOS Sent! Help is on the way 🙏' : 'SOS — Emergency Blood Needed',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text(_sosActive ? 'Nearby donors have been notified' : 'Tap to fill details & alert nearby donors',
+                      style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                  Text(_sosActive ? 'Nearby donors notified' : 'Tap to fill details & alert nearby donors',
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12)),
                 ]),
               ),
             ),
 
-            const SizedBox(height: 28),
+            const SizedBox(height: 24),
 
-            // Search section header
+            // Search Mode Toggle
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(14)),
+              child: Row(children: [
+                _buildModeToggle('Donors', 0, Icons.favorite_rounded, color),
+                _buildModeToggle('Blood Banks', 1, Icons.local_hospital_rounded, color),
+                _buildModeToggle('Hospitals', 2, Icons.business_rounded, color),
+              ]),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Blood group (donors only)
+            if (_searchMode == 0) ...[
+              const Text('Blood Group *',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10, children: _bloodGroups.map((g) {
+                final sel = _selectedBloodGroup == g;
+                return GestureDetector(
+                  onTap: () { HapticFeedback.lightImpact(); setState(() => _selectedBloodGroup = g); },
+                  child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 58, height: 42,
+                      decoration: BoxDecoration(
+                          color: sel ? color : Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: sel ? color : Colors.grey.shade200, width: sel ? 2 : 1),
+                          boxShadow: sel ? [BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 8)] : []),
+                      child: Center(child: Text(g,
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                              color: sel ? Colors.white : Colors.grey.shade700)))),
+                );
+              }).toList()),
+              const SizedBox(height: 16),
+            ],
+
+            // Location filter section header
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Find a Donor',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-              GestureDetector(
-                onTap: () => setState(() => _showFilters = !_showFilters),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                      color: _hasActiveFilters ? color.withValues(alpha: 0.1) : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: _hasActiveFilters ? color.withValues(alpha: 0.3) : Colors.grey.shade200)),
-                  child: Row(children: [
-                    Icon(Icons.tune_rounded, size: 14,
-                        color: _hasActiveFilters ? color : Colors.grey.shade600),
-                    const SizedBox(width: 4),
-                    Text('Filters${_hasActiveFilters ? ' ●' : ''}',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                            color: _hasActiveFilters ? color : Colors.grey.shade600)),
-                  ]),
+              const Text('Location Filter',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+              Row(children: [
+                if (_hasActiveFilters)
+                  GestureDetector(
+                      onTap: _clearFilters,
+                      child: Text('Clear', style: TextStyle(fontSize: 12, color: Colors.red.shade400, fontWeight: FontWeight.w500))),
+                if (_hasActiveFilters) const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: () => setState(() => _showFilters = !_showFilters),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                        color: _hasActiveFilters ? color.withValues(alpha: 0.1) : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: _hasActiveFilters ? color.withValues(alpha: 0.3) : Colors.grey.shade200)),
+                    child: Row(children: [
+                      Icon(_showFilters ? Icons.expand_less : Icons.tune_rounded,
+                          size: 14, color: _hasActiveFilters ? color : Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(_showFilters ? 'Hide' : 'Show${_hasActiveFilters ? ' ●' : ''}',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                              color: _hasActiveFilters ? color : Colors.grey.shade600)),
+                    ]),
+                  ),
                 ),
-              ),
+              ]),
             ]),
 
-            const SizedBox(height: 12),
-
-            // Blood group selector
-            const Text('Blood Group *',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
             const SizedBox(height: 10),
-            Wrap(spacing: 10, runSpacing: 10, children: _bloodGroups.map((g) {
-              final sel = _selectedBloodGroup == g;
-              return GestureDetector(
-                onTap: () { HapticFeedback.lightImpact(); setState(() => _selectedBloodGroup = g); },
-                child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 58, height: 42,
-                    decoration: BoxDecoration(
-                        color: sel ? color : Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: sel ? color : Colors.grey.shade200, width: sel ? 2 : 1),
-                        boxShadow: sel ? [BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 8)] : []),
-                    child: Center(child: Text(g,
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
-                            color: sel ? Colors.white : Colors.grey.shade700)))),
-              );
-            }).toList()),
 
-            // Location filters — expandable
+            // Location filter panel
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 300),
               crossFadeState: _showFilters ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-              firstChild: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: color.withValues(alpha: 0.15))),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text('Location Filter', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color)),
-                      if (_hasActiveFilters)
-                        GestureDetector(
-                            onTap: _clearFilters,
-                            child: Text('Clear all', style: TextStyle(fontSize: 12, color: Colors.red.shade400))),
-                    ]),
-                    const SizedBox(height: 12),
+              firstChild: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: color.withValues(alpha: 0.15))),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                    // State dropdown
-                    const Text('State', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<String>(
-                      value: _filterState,
-                      isExpanded: true,
-                      hint: Text('Select State', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
-                      decoration: InputDecoration(
-                          filled: true, fillColor: Colors.white,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: 1.5)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          isDense: true),
-                      items: _states.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13)))).toList(),
-                      onChanged: (val) => setState(() { _filterState = val; _filterDistrict = null; }),
-                      dropdownColor: Colors.white,
-                      menuMaxHeight: 250,
-                      icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+                  // State dropdown from JSON
+                  const Text('State', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 6),
+                  _loadingLocation
+                      ? Center(child: CircularProgressIndicator(color: color, strokeWidth: 2))
+                      : DropdownButtonFormField<String>(
+                    value: _filterState,
+                    isExpanded: true,
+                    hint: Text('Select State', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+                    decoration: _filterInputDecoration(color),
+                    items: _states.map((s) => DropdownMenuItem(
+                        value: s, child: Text(s, style: const TextStyle(fontSize: 13)))).toList(),
+                    onChanged: _onStateChanged,
+                    dropdownColor: Colors.white,
+                    menuMaxHeight: 250,
+                    icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // District dropdown from JSON
+                  const Text('District', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 6),
+                  IgnorePointer(
+                    ignoring: _filterState == null,
+                    child: Opacity(
+                      opacity: _filterState == null ? 0.5 : 1.0,
+                      child: DropdownButtonFormField<String>(
+                        value: _filterDistrict,
+                        isExpanded: true,
+                        hint: Text(_filterState == null ? 'Select State first' : 'Select District',
+                            style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+                        decoration: _filterInputDecoration(color),
+                        items: _districts.map((d) => DropdownMenuItem(
+                            value: d, child: Text(d, style: const TextStyle(fontSize: 13)))).toList(),
+                        onChanged: _filterState == null ? null : (val) => setState(() => _filterDistrict = val),
+                        dropdownColor: Colors.white,
+                        menuMaxHeight: 250,
+                        icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+                      ),
                     ),
+                  ),
 
-                    const SizedBox(height: 10),
+                  const SizedBox(height: 10),
 
-                    // District — manual type
-                    const Text('District', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
-                    const SizedBox(height: 6),
-                    TextFormField(
-                      initialValue: _filterDistrict,
-                      enabled: _filterState != null,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                          hintText: _filterState == null ? 'Select State first' : 'Type district name',
-                          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                          filled: true, fillColor: _filterState != null ? Colors.white : Colors.grey.shade50,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: 1.5)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          isDense: true),
-                      onChanged: (val) => setState(() => _filterDistrict = val.isEmpty ? null : val),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    // City
-                    const Text('City', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
-                    const SizedBox(height: 6),
-                    TextFormField(
-                      controller: _cityCtrl,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                          hintText: 'Type city name',
-                          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                          filled: true, fillColor: Colors.white,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: 1.5)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          isDense: true),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ]),
-                ),
-              ]),
+                  // City — type manually
+                  const Text('City (type manually)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 6),
+                  TextFormField(
+                    controller: _cityCtrl,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                        hintText: 'Type city name',
+                        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                        prefixIcon: Icon(Icons.location_city_outlined, color: Colors.grey.shade400, size: 18),
+                        filled: true, fillColor: Colors.white,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: 1.5)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        isDense: true),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ]),
+              ),
               secondChild: const SizedBox.shrink(),
             ),
+
+            // Active filter chips
+            if (_hasActiveFilters) ...[
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                if (_filterState != null) _buildChip(_filterState!, color, () => _onStateChanged(null)),
+                if (_filterDistrict != null) _buildChip(_filterDistrict!, color, () => setState(() => _filterDistrict = null)),
+                if (_cityCtrl.text.isNotEmpty) _buildChip(_cityCtrl.text, color, () { _cityCtrl.clear(); setState(() {}); }),
+              ]),
+            ],
 
             const SizedBox(height: 16),
 
@@ -315,7 +390,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                 icon: _isSearching
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.search_rounded),
-                label: Text(_isSearching ? 'Searching...' : 'Search Donors'),
+                label: Text(_isSearching ? 'Searching...' : _searchMode == 0 ? 'Search Donors' : _searchMode == 1 ? 'Search Blood Banks' : 'Search Hospitals'),
                 style: ElevatedButton.styleFrom(
                     backgroundColor: color, foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -325,19 +400,9 @@ class _DonorSearchTabState extends State<DonorSearchTab>
 
             const SizedBox(height: 20),
 
-            // Active filters display
-            if (_hasActiveFilters) ...[
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                if (_filterState != null) _buildFilterChip(_filterState!, color, () => setState(() => _filterState = null)),
-                if (_filterDistrict != null) _buildFilterChip(_filterDistrict!, color, () => setState(() => _filterDistrict = null)),
-                if (_cityCtrl.text.isNotEmpty) _buildFilterChip(_cityCtrl.text, color, () { _cityCtrl.clear(); setState(() {}); }),
-              ]),
-              const SizedBox(height: 16),
-            ],
-
             // Results
             if (_results.isNotEmpty) ...[
-              Text('${_results.length} donor${_results.length > 1 ? 's' : ''} found',
+              Text('${_results.length} result${_results.length > 1 ? 's' : ''} found',
                   style: TextStyle(fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
               const SizedBox(height: 12),
               ..._results.asMap().entries.map((entry) {
@@ -345,20 +410,19 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                 final d = entry.value;
                 return TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0, end: 1),
-                  duration: Duration(milliseconds: 300 + i * 80),
+                  duration: Duration(milliseconds: 300 + i * 60),
                   builder: (context, val, child) => Opacity(
-                      opacity: val, child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child)),
-                  child: _buildDonorCard(d, color),
+                      opacity: val, child: Transform.translate(offset: Offset(0, 20*(1-val)), child: child)),
+                  child: _searchMode == 0 ? _buildDonorCard(d, color) : _buildOrgCard(d, color),
                 );
               }),
-            ] else if (!_isSearching && _selectedBloodGroup != null) ...[
+            ] else if (!_isSearching) ...[
               Center(child: Padding(
                 padding: const EdgeInsets.all(30),
                 child: Column(children: [
-                  Icon(Icons.search_off_rounded, size: 50, color: Colors.grey.shade200),
+                  Icon(Icons.search_rounded, size: 50, color: Colors.grey.shade200),
                   const SizedBox(height: 12),
-                  Text('No donors found', style: TextStyle(color: Colors.grey.shade400, fontSize: 16)),
-                  Text('Try different filters', style: TextStyle(color: Colors.grey.shade300, fontSize: 13)),
+                  Text('Search to find results', style: TextStyle(color: Colors.grey.shade400, fontSize: 15)),
                 ]),
               )),
             ],
@@ -369,21 +433,50 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     );
   }
 
-  Widget _buildFilterChip(String label, Color color, VoidCallback onRemove) {
+  Widget _buildModeToggle(String label, int index, IconData icon, Color color) {
+    final active = _searchMode == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () { HapticFeedback.lightImpact(); setState(() { _searchMode = index; _results = []; _selectedBloodGroup = null; }); },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+              color: active ? color : Colors.transparent,
+              borderRadius: BorderRadius.circular(10)),
+          child: Column(children: [
+            Icon(icon, size: 16, color: active ? Colors.white : Colors.grey.shade500),
+            const SizedBox(height: 3),
+            Text(label, textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: active ? Colors.white : Colors.grey.shade500)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _filterInputDecoration(Color color) => InputDecoration(
+    filled: true, fillColor: Colors.white,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: color, width: 1.5)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    isDense: true,
+  );
+
+  Widget _buildChip(String label, Color color, VoidCallback onRemove) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
+          color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
           border: Border.all(color: color.withValues(alpha: 0.3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.location_on_rounded, size: 12, color: color),
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
         const SizedBox(width: 4),
-        GestureDetector(
-            onTap: onRemove,
-            child: Icon(Icons.close_rounded, size: 14, color: color)),
+        GestureDetector(onTap: onRemove, child: Icon(Icons.close_rounded, size: 14, color: color)),
       ]),
     );
   }
@@ -391,10 +484,8 @@ class _DonorSearchTabState extends State<DonorSearchTab>
   Widget _buildDonorCard(Map<String, dynamic> d, Color color) {
     final isMe = d['uid'] == FirebaseAuth.instance.currentUser?.uid;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16),
+      margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
       child: Row(children: [
         Container(width: 46, height: 46,
@@ -414,15 +505,39 @@ class _DonorSearchTabState extends State<DonorSearchTab>
             ],
           ]),
           const SizedBox(height: 2),
-          Text('${d['city'] ?? ''}${d['district'] != null ? ', ${d['district']}' : ''}${d['state'] != null ? ', ${d['state']}' : ''}',
+          Text([d['city'], d['district'], d['state']].where((e) => e != null && e.toString().isNotEmpty).join(', '),
               style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
           if (d['age'] != null)
             Text('Age ${d['age']}', style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
         ])),
-        Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
             child: Text('Available', style: TextStyle(color: Colors.green.shade600, fontSize: 11, fontWeight: FontWeight.w600))),
+      ]),
+    );
+  }
+
+  Widget _buildOrgCard(Map<String, dynamic> d, Color color) {
+    final isBank = _searchMode == 1;
+    final name = isBank ? (d['bank_name'] ?? 'Blood Bank') : (d['hospital_name'] ?? 'Hospital');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+      child: Row(children: [
+        Container(width: 46, height: 46,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.1)),
+            child: Icon(isBank ? Icons.local_hospital_rounded : Icons.business_rounded, color: color, size: 22)),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
+          const SizedBox(height: 2),
+          Text([d['city'], d['district'], d['state']].where((e) => e != null && e.toString().isNotEmpty).join(', '),
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          if (d['phone'] != null && d['phone'].toString().isNotEmpty)
+            Text(d['phone'], style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
+        ])),
+        Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey.shade300, size: 16),
       ]),
     );
   }

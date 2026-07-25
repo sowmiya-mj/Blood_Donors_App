@@ -280,29 +280,69 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
                 // Header row
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('Donation History',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                    const SizedBox(height: 4),
-                    Text('Your journey of saving lives',
-                        style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
-                  ]),
-                  // Add donation button
-                  GestureDetector(
-                    onTap: () { HapticFeedback.lightImpact(); _showAddDonationSheet(); },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: color, borderRadius: BorderRadius.circular(20)),
-                      child: Row(children: [
-                        const Icon(Icons.add, color: Colors.white, size: 16),
-                        const SizedBox(width: 4),
-                        const Text('Log Donation', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-                      ]),
+                // Header row
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Donation History',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1A1A2E),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Your journey of saving lives',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ]),
+
+                    const SizedBox(width: 8),
+
+                    //Add Donation Button
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        _showAddDonationSheet();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add, color: Colors.white, size: 16),
+                            SizedBox(width: 4),
+                            Text(
+                              'Log Donation',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
 
                 const SizedBox(height: 24),
 
