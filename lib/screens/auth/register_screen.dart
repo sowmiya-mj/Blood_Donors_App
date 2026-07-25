@@ -8,7 +8,17 @@ import '../recipient/recipient_dashboard.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String role;
-  const RegisterScreen({super.key, required this.role});
+  final String prefillName;
+  final String prefillEmail;
+  final bool isGoogleSignIn;
+
+  const RegisterScreen({
+    super.key,
+    required this.role,
+    this.prefillName = '',
+    this.prefillEmail = '',
+    this.isGoogleSignIn = false,
+  });
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -69,6 +79,11 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     _shakeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
     _shakeAnim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn));
     _fadeController.forward();
+
+    // Pre-fill Google Sign In data
+    if (widget.prefillName.isNotEmpty) _nameCtrl.text = widget.prefillName;
+    if (widget.prefillName.isNotEmpty) _orgNameCtrl.text = widget.prefillName;
+    if (widget.prefillEmail.isNotEmpty) _emailCtrl.text = widget.prefillEmail;
   }
 
   @override
@@ -189,11 +204,17 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     setState(() { isLoading = true; errorMessage = null; });
 
     try {
-      final cred = await _auth.createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
-      );
-      final uid = cred.user!.uid;
+      String uid;
+      if (widget.isGoogleSignIn) {
+        // Already authenticated via Google — just get current user uid
+        uid = _auth.currentUser!.uid;
+      } else {
+        final cred = await _auth.createUserWithEmailAndPassword(
+          email: _emailCtrl.text.trim(),
+          password: _passwordCtrl.text,
+        );
+        uid = cred.user!.uid;
+      }
 
       // Base user data
       final baseData = {
@@ -259,8 +280,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       }
 
       setState(() => successMessage = 'Account created successfully! 🎉');
-      await Future.delayed(const Duration(milliseconds: 800));
-
+      await Future.delayed(const Duration(seconds: 1));
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -394,21 +414,42 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
           const SizedBox(height: 16),
 
           // Common fields
-          _buildField(controller: _emailCtrl, label: 'Email address', hint: 'you@example.com', icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress,
-              validator: (v) => v!.isEmpty ? 'Required' : !v.contains('@') || !v.contains('.') ? 'Enter a valid email' : null),
+          // Email — locked for Google Sign In users
+          if (widget.isGoogleSignIn)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200)),
+              child: Row(children: [
+                Icon(Icons.email_outlined, color: Colors.grey.shade400, size: 20),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Email address', style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
+                  Text(_emailCtrl.text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+                ])),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [
+                      Icon(Icons.verified_rounded, size: 12, color: Colors.green.shade600),
+                      const SizedBox(width: 4),
+                      Text('Google', style: TextStyle(fontSize: 11, color: Colors.green.shade600, fontWeight: FontWeight.w600)),
+                    ])),
+              ]),
+            )
+          else
+            _buildField(controller: _emailCtrl, label: 'Email address', hint: 'you@example.com', icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress,
+                validator: (v) => v!.isEmpty ? 'Required' : !v.contains('@') || !v.contains('.') ? 'Enter a valid email' : null),
           const SizedBox(height: 16),
           _buildField(controller: _phoneCtrl, label: 'Phone number', hint: '+91 98765 43210', icon: Icons.phone_outlined, color: color, keyboardType: TextInputType.phone,
               validator: (v) {
                 if (v == null || v.isEmpty) return 'Required';
-                // Remove +91 or 0 prefix
                 final digits = v.replaceAll(RegExp(r'\D'), '');
-                final number = digits.startsWith('91') && digits.length == 12
-                    ? digits.substring(2)
-                    : digits;
-                if (number.length != 10) return 'Enter valid 10-digit mobile number';
+                final number = digits.startsWith('91') && digits.length == 12 ? digits.substring(2) : digits;
+                if (number.length != 10) return 'Enter valid 10-digit number';
                 return null;
-              },
-          ),
+              }),
           const SizedBox(height: 16),
 
           // Location picker
@@ -420,28 +461,27 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
           ),
           const SizedBox(height: 16),
 
-          // Password with strength indicator
-          _buildField(controller: _passwordCtrl, label: 'Password', hint: 'Min 8 chars, uppercase, number, symbol', icon: Icons.lock_outline, color: color,
-              isPassword: true, isObscure: obscurePassword, onToggle: () => setState(() => obscurePassword = !obscurePassword),
-              validator: _validatePassword,
-              onChanged: (_) => setState(() {})),
-
-          // Password strength bar
-          if (_passwordCtrl.text.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(children: [
-              Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(value: strength, backgroundColor: Colors.grey.shade200,
-                      valueColor: AlwaysStoppedAnimation<Color>(_strengthColor(strength)), minHeight: 5))),
-              const SizedBox(width: 10),
-              Text(_strengthLabel(strength), style: TextStyle(fontSize: 12, color: _strengthColor(strength), fontWeight: FontWeight.w600)),
-            ]),
+          // Password — hide for Google Sign In users
+          if (!widget.isGoogleSignIn) ...[
+            _buildField(controller: _passwordCtrl, label: 'Password', hint: 'Min 8 chars, uppercase, number, symbol', icon: Icons.lock_outline, color: color,
+                isPassword: true, isObscure: obscurePassword, onToggle: () => setState(() => obscurePassword = !obscurePassword),
+                validator: _validatePassword,
+                onChanged: (_) => setState(() {})),
+            if (_passwordCtrl.text.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(value: strength, backgroundColor: Colors.grey.shade200,
+                        valueColor: AlwaysStoppedAnimation<Color>(_strengthColor(strength)), minHeight: 5))),
+                const SizedBox(width: 10),
+                Text(_strengthLabel(strength), style: TextStyle(fontSize: 12, color: _strengthColor(strength), fontWeight: FontWeight.w600)),
+              ]),
+            ],
+            const SizedBox(height: 16),
+            _buildField(controller: _confirmPasswordCtrl, label: 'Confirm Password', hint: '••••••••', icon: Icons.lock_outline, color: color,
+                isPassword: true, isObscure: obscureConfirm, onToggle: () => setState(() => obscureConfirm = !obscureConfirm),
+                validator: (v) => v!.isEmpty ? 'Required' : v != _passwordCtrl.text ? 'Passwords do not match' : null),
           ],
-          const SizedBox(height: 16),
-
-          _buildField(controller: _confirmPasswordCtrl, label: 'Confirm Password', hint: '••••••••', icon: Icons.lock_outline, color: color,
-              isPassword: true, isObscure: obscureConfirm, onToggle: () => setState(() => obscureConfirm = !obscureConfirm),
-              validator: (v) => v!.isEmpty ? 'Required' : v != _passwordCtrl.text ? 'Passwords do not match' : null),
 
           // Multi-role checkbox (Donor only)
           if (widget.role.toLowerCase() == 'donor') ...[

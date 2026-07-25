@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import '../../screens/donor/donor_dashboard.dart';
 import '../../screens/recipient/recipient_dashboard.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -57,7 +57,6 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
     _fadeController.forward();
 
-    // v7: initialize() must be called once before any other method
     GoogleSignIn.instance.initialize(
       clientId: '768808579408-7324ar7dec8ahhfe3c87t6g1te8k9vc2.apps.googleusercontent.com',
     );
@@ -108,6 +107,28 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     }
   }
 
+  String get _collection {
+    switch (widget.role.toLowerCase()) {
+      case 'donor': return 'donors';
+      case 'recipient': return 'recipients';
+      case 'hospital': return 'hospitals';
+      case 'blood bank': return 'blood_banks';
+      default: return 'donors';
+    }
+  }
+
+  void _navigateToDashboard() {
+    final role = widget.role.toLowerCase();
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => role == 'donor'
+            ? const DonorDashboard()
+            : const RecipientDashboard(),
+      ),
+    );
+  }
+
   Future<void> _handleEmailLogin() async {
     if (emailController.text.trim().isEmpty || passwordController.text.isEmpty) {
       setState(() => errorMessage = 'Please fill in all fields');
@@ -121,21 +142,10 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         password: passwordController.text,
       );
 
-      // Role validation — Firestore check
       final uid = cred.user!.uid;
-      final role = widget.role.toLowerCase();
-      final collection = role == 'donor' ? 'donors'
-          : role == 'recipient' ? 'recipients'
-          : role == 'hospital' ? 'hospitals'
-          : 'blood_banks';
-
-      final doc = await FirebaseFirestore.instance
-          .collection(collection)
-          .doc(uid)
-          .get();
+      final doc = await FirebaseFirestore.instance.collection(_collection).doc(uid).get();
 
       if (!doc.exists) {
-        // Wrong role — logout பண்ணிட்டு error காட்டு
         await FirebaseAuth.instance.signOut();
         setState(() => errorMessage =
         'No ${widget.role} account found for this email.\nPlease register as ${widget.role} first.');
@@ -143,17 +153,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         return;
       }
 
-      // Correct role — navigate
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => role == 'donor'
-                ? const DonorDashboard()
-                : const RecipientDashboard(),
-          ),
-        );
-      }
+      if (mounted) _navigateToDashboard();
+
     } on FirebaseAuthException catch (e) {
       setState(() {
         switch (e.code) {
@@ -174,18 +175,36 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   Future<void> _handleGoogleSignIn() async {
     setState(() { isGoogleLoading = true; errorMessage = null; });
     try {
-      // v7: authenticate() replaces signIn()
       final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();
       if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
 
-      // v7: authentication is now SYNCHRONOUS - no await!
       final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(idToken: googleAuth.idToken);
+      final userCred = await _auth.signInWithCredential(credential);
+      final uid = userCred.user!.uid;
 
-      final credential = GoogleAuthProvider.credential(
-        idToken: googleAuth.idToken,
-      );
-      await _auth.signInWithCredential(credential);
-      // TODO: Navigator.pushReplacement to dashboard
+      // Check Firestore — already registered in this role?
+      final doc = await FirebaseFirestore.instance.collection(_collection).doc(uid).get();
+
+      if (!mounted) return;
+
+      if (doc.exists) {
+        // Already registered → Dashboard
+        _navigateToDashboard();
+      } else {
+        // New Google user → Register screen with pre-filled data
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => RegisterScreen(
+              role: widget.role,
+              prefillName: userCred.user?.displayName ?? '',
+              prefillEmail: userCred.user?.email ?? '',
+              isGoogleSignIn: true,
+            ),
+          ),
+        );
+      }
     } on GoogleSignInException catch (e) {
       setState(() => errorMessage = 'Google Sign In failed: ${e.code.name}');
       _triggerShake();
@@ -242,35 +261,22 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         height: isMobile ? 260 : double.infinity,
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              color.withValues(alpha: 0.12),
-              color.withValues(alpha: 0.04),
-              Colors.white,
-            ],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            colors: [color.withValues(alpha: 0.12), color.withValues(alpha: 0.04), Colors.white],
           ),
         ),
         child: Stack(children: [
-          Positioned(top: -40, left: -40, child: Container(
-            width: 200, height: 200,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.08)),
-          )),
-          Positioned(bottom: -30, right: -30, child: Container(
-            width: 150, height: 150,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.06)),
-          )),
+          Positioned(top: -40, left: -40, child: Container(width: 200, height: 200,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.08)))),
+          Positioned(bottom: -30, right: -30, child: Container(width: 150, height: 150,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.06)))),
           Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             ScaleTransition(
               scale: _heartAnimation,
               child: Container(
-                width: isMobile ? 90 : 130,
-                height: isMobile ? 90 : 130,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color.withValues(alpha: 0.12),
-                  border: Border.all(color: color.withValues(alpha: 0.3), width: 2),
-                ),
+                width: isMobile ? 90 : 130, height: isMobile ? 90 : 130,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.12),
+                    border: Border.all(color: color.withValues(alpha: 0.3), width: 2)),
                 child: Icon(_roleIcon, size: isMobile ? 44 : 65, color: color),
               ),
             ),
@@ -280,27 +286,10 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             SizedBox(height: isMobile ? 8 : 16),
             Text(_roleTagline, textAlign: TextAlign.center,
                 style: TextStyle(fontSize: isMobile ? 13 : 16, color: Colors.grey.shade600, height: 1.5)),
-            if (!isMobile) ...[
-              const SizedBox(height: 48),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                _buildStat('10K+', 'Donors', color),
-                const SizedBox(width: 32),
-                _buildStat('500+', 'Blood Banks', color),
-                const SizedBox(width: 32),
-                _buildStat('98%', 'Success Rate', color),
-              ]),
-            ],
           ])),
         ]),
       ),
     );
-  }
-
-  Widget _buildStat(String value, String label, Color color) {
-    return Column(children: [
-      Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
-      Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-    ]);
   }
 
   Widget _buildFormPanel(Color color) {
@@ -325,25 +314,24 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           Row(children: [
             Text("Don't have an account? ", style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
             GestureDetector(
-              onTap: () { Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => RegisterScreen(role: widget.role),
-                ),
-              ); },
-              child: Text('Register here', style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600, decoration: TextDecoration.underline, decorationColor: color)),
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => RegisterScreen(role: widget.role))),
+              child: Text('Register here', style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline, decorationColor: color)),
             ),
           ]),
           const SizedBox(height: 36),
-          _buildTextField(controller: emailController, label: 'Email address', hint: 'you@example.com', icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress),
+          _buildTextField(controller: emailController, label: 'Email address', hint: 'you@example.com',
+              icon: Icons.email_outlined, color: color, keyboardType: TextInputType.emailAddress),
           const SizedBox(height: 16),
-          _buildTextField(controller: passwordController, label: 'Password', hint: '••••••••', icon: Icons.lock_outline, color: color, isPassword: true),
+          _buildTextField(controller: passwordController, label: 'Password', hint: '••••••••',
+              icon: Icons.lock_outline, color: color, isPassword: true),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
-              onPressed: () { Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => ForgotPasswordScreen(roleColor: _roleColor)));},
+              onPressed: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ForgotPasswordScreen(roleColor: _roleColor))),
               style: TextButton.styleFrom(foregroundColor: color, padding: EdgeInsets.zero),
               child: const Text('Forgot password?', style: TextStyle(fontSize: 13)),
             ),
@@ -352,7 +340,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
+              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.shade200)),
               child: Row(children: [
                 Icon(Icons.error_outline, color: Colors.red.shade600, size: 18),
                 const SizedBox(width: 8),
@@ -366,10 +355,9 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             child: ElevatedButton(
               onPressed: isLoading ? null : _handleEmailLogin,
               style: ElevatedButton.styleFrom(
-                backgroundColor: color, foregroundColor: Colors.white,
-                disabledBackgroundColor: color.withValues(alpha: 0.6),
-                elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
+                  backgroundColor: color, foregroundColor: Colors.white,
+                  disabledBackgroundColor: color.withValues(alpha: 0.6),
+                  elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
               child: isLoading
                   ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                   : const Text('Login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
@@ -388,10 +376,9 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             child: OutlinedButton(
               onPressed: isGoogleLoading ? null : _handleGoogleSignIn,
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: Colors.grey.shade300, width: 1.5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                backgroundColor: Colors.white,
-              ),
+                  side: BorderSide(color: Colors.grey.shade300, width: 1.5),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  backgroundColor: Colors.white),
               child: isGoogleLoading
                   ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: color, strokeWidth: 2.5))
                   : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -436,11 +423,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
           prefixIcon: Icon(icon, color: Colors.grey.shade400, size: 20),
           suffixIcon: isPassword ? IconButton(
-            icon: Icon(obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: Colors.grey.shade400, size: 20),
+            icon: Icon(obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                color: Colors.grey.shade400, size: 20),
             onPressed: () => setState(() => obscurePassword = !obscurePassword),
           ) : null,
-          filled: true,
-          fillColor: Colors.grey.shade50,
+          filled: true, fillColor: Colors.grey.shade50,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
