@@ -93,6 +93,26 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                 borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
               ),
               child: Column(children: [
+                // BloodLink logo + tagline row
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Row(children: [
+                    Image.asset('assets/images/bloodlink_logo.png', height: 32, width: 32),
+                    const SizedBox(width: 8),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('BloodLink',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      Text('Your Blood. Someone\'s Tomorrow.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 9, letterSpacing: 0.3)),
+                    ]),
+                  ]),
+                  // Notification bell placeholder
+                  Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
+                      child: Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
+                ]),
+                const SizedBox(height: 16),
+                // User greeting row
                 Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('Good ${_greeting()}, 👋', style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14)),
@@ -247,7 +267,7 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
               Row(children: [
-                _buildActionButton(Icons.local_hospital_rounded, 'Find Blood\nBank', Colors.blue, () {}),
+                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBank', Colors.blue, () {}),
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange, () {}),
                 const SizedBox(width: 12),
@@ -277,20 +297,6 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
     ));
   }
 
-  List<String> _getCompatibleTypes(String bloodGroup) {
-    switch (bloodGroup) {
-      case 'O-': return ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
-      case 'O+': return ['O+', 'A+', 'B+', 'AB+'];
-      case 'A-': return ['A-', 'A+', 'AB-', 'AB+'];
-      case 'A+': return ['A+', 'AB+'];
-      case 'B-': return ['B-', 'B+', 'AB-', 'AB+'];
-      case 'B+': return ['B+', 'AB+'];
-      case 'AB-': return ['AB-', 'AB+'];
-      case 'AB+': return ['AB+'];
-      default: return [];
-    }
-  }
-
   List<String> _getCanReceiveFrom(String bloodGroup) {
     switch (bloodGroup) {
       case 'O-': return ['O-'];
@@ -301,6 +307,20 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
       case 'B+': return ['O-', 'O+', 'B-', 'B+'];
       case 'AB-': return ['O-', 'A-', 'B-', 'AB-'];
       case 'AB+': return ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
+      default: return [];
+    }
+  }
+
+  List<String> _getCompatibleTypes(String bloodGroup) {
+    switch (bloodGroup) {
+      case 'O-': return ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
+      case 'O+': return ['O+', 'A+', 'B+', 'AB+'];
+      case 'A-': return ['A-', 'A+', 'AB-', 'AB+'];
+      case 'A+': return ['A+', 'AB+'];
+      case 'B-': return ['B-', 'B+', 'AB-', 'AB+'];
+      case 'B+': return ['B+', 'AB+'];
+      case 'AB-': return ['AB-', 'AB+'];
+      case 'AB+': return ['AB+'];
       default: return [];
     }
   }
@@ -324,7 +344,7 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
             const SizedBox(height: 6),
             Text('${types.length}', style: const TextStyle(
                 fontSize: 20, fontWeight: FontWeight.bold, color: Colors.purple)),
-            Text('Can Donate To', textAlign: TextAlign.center,
+            Text('Compatible', textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
           ]),
         ),
@@ -355,7 +375,7 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                 ]),
               ]),
               const SizedBox(height: 20),
-              Text('You can donate to:',
+              Text('🩸 You can donate to:',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
               const SizedBox(height: 10),
               Wrap(spacing: 10, runSpacing: 10, children: donateTo.map((g) =>
@@ -367,6 +387,20 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                         border: Border.all(color: Colors.purple.shade200)),
                     child: Text(g, style: TextStyle(
                         color: Colors.purple.shade700, fontWeight: FontWeight.bold, fontSize: 14)),
+                  )).toList()),
+              const SizedBox(height: 20),
+              Text('💉 You can receive from:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10, children: _getCanReceiveFrom(bloodGroup).map((g) =>
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.red.shade200)),
+                    child: Text(g, style: TextStyle(
+                        color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 14)),
                   )).toList()),
               const SizedBox(height: 24),
               if (bloodGroup == 'O-')
@@ -387,32 +421,11 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                       Expanded(child: Text('You are a Universal Recipient! You can receive blood from anyone.',
                           style: TextStyle(color: Colors.blue.shade700, fontSize: 12, fontWeight: FontWeight.w500))),
                     ])),
-              const SizedBox(height: 20),
-              Text('You can receive from:',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
-              const SizedBox(height: 10),
-              Wrap(spacing: 10, runSpacing: 10,
-                  children: _getCanReceiveFrom(bloodGroup).map((g) =>
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.green.shade200)),
-                        child: Text(g, style: TextStyle(
-                            color: Colors.green.shade700,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14)),
-                      )).toList()),
+              const SizedBox(height: 16),
             ]),
       ),
-
     );
-
-
   }
-
-
 
   Widget _buildActionButton(IconData icon, String label, Color color, VoidCallback onTap) {
     return Expanded(child: GestureDetector(

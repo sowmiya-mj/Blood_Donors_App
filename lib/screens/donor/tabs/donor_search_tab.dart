@@ -22,6 +22,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
   String? _selectedBloodGroup;
   bool _isSearching = false;
   bool _sosActive = false;
+  bool _hasSearched = false;
   bool _showFilters = false;
   List<Map<String, dynamic>> _results = [];
 
@@ -33,6 +34,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
   String? _filterState;
   String? _filterDistrict;
   final TextEditingController _cityCtrl = TextEditingController();
+  final TextEditingController _nameSearchCtrl = TextEditingController();
   bool _loadingLocation = true;
 
   late AnimationController _fadeController;
@@ -53,6 +55,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
   void dispose() {
     _fadeController.dispose();
     _cityCtrl.dispose();
+    _nameSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -94,7 +97,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
       return;
     }
 
-    setState(() { _isSearching = true; _results = []; });
+    setState(() { _hasSearched = true; _isSearching = true; _results = []; });
 
     try {
       if (_searchMode == 0) {
@@ -133,6 +136,23 @@ class _DonorSearchTabState extends State<DonorSearchTab>
         final snap = await query.limit(50).get();
         var results = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
 
+        if (_nameSearchCtrl.text.trim().isNotEmpty) {
+          final keyword = _nameSearchCtrl.text.trim().toLowerCase();
+
+          results = results.where((d) {
+
+            final name = (_searchMode == 1
+                ? d['bank_name']
+                : d['hospital_name'])
+                ?.toString()
+                .toLowerCase() ??
+                '';
+
+            return name.contains(keyword);
+
+          }).toList();
+        }
+
         // City filter — case insensitive
         if (_cityCtrl.text.trim().isNotEmpty) {
           final cityQuery = _cityCtrl.text.trim().toLowerCase();
@@ -153,10 +173,13 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     _filterDistrict = null;
     _districts = [];
     _cityCtrl.clear();
+    _nameSearchCtrl.clear();
+    _results.clear();
+    _hasSearched = false;
   });
 
   bool get _hasActiveFilters =>
-      _filterState != null || _filterDistrict != null || _cityCtrl.text.isNotEmpty;
+      _filterState != null || _filterDistrict != null || _cityCtrl.text.isNotEmpty || _nameSearchCtrl.text.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -173,7 +196,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
             const Text('Search & Request',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
             const SizedBox(height: 4),
-            Text('Find donors, blood banks or send SOS',
+            Text('Find donors, blood banks, Hospital or\nsend SOS',
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
             const SizedBox(height: 20),
 
@@ -254,6 +277,37 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                 );
               }).toList()),
               const SizedBox(height: 16),
+            ],
+
+
+            // Search by Blood Bank and Hospital name
+            if (_searchMode != 0) ...[
+              const Text(
+                'Search by Name',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1A1A2E),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              TextFormField(
+                controller: _nameSearchCtrl,
+                decoration: InputDecoration(
+                  hintText: _searchMode == 1
+                      ? 'Search Blood Bank'
+                      : 'Search Hospital',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 18),
             ],
 
             // Location filter section header
@@ -377,6 +431,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                 if (_filterState != null) _buildChip(_filterState!, color, () => _onStateChanged(null)),
                 if (_filterDistrict != null) _buildChip(_filterDistrict!, color, () => setState(() => _filterDistrict = null)),
                 if (_cityCtrl.text.isNotEmpty) _buildChip(_cityCtrl.text, color, () { _cityCtrl.clear(); setState(() {}); }),
+                if (_nameSearchCtrl.text.isNotEmpty)_buildChip(_nameSearchCtrl.text, color, () {_nameSearchCtrl.clear();setState(() {});},),
               ]),
             ],
 
@@ -402,30 +457,88 @@ class _DonorSearchTabState extends State<DonorSearchTab>
 
             // Results
             if (_results.isNotEmpty) ...[
-              Text('${_results.length} result${_results.length > 1 ? 's' : ''} found',
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
+              Text(
+                '${_results.length} result${_results.length > 1 ? 's' : ''} found',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 12),
               ..._results.asMap().entries.map((entry) {
                 final i = entry.key;
                 final d = entry.value;
+
                 return TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0, end: 1),
                   duration: Duration(milliseconds: 300 + i * 60),
                   builder: (context, val, child) => Opacity(
-                      opacity: val, child: Transform.translate(offset: Offset(0, 20*(1-val)), child: child)),
-                  child: _searchMode == 0 ? _buildDonorCard(d, color) : _buildOrgCard(d, color),
+                    opacity: val,
+                    child: Transform.translate(
+                      offset: Offset(0, 20 * (1 - val)),
+                      child: child,
+                    ),
+                  ),
+                  child: _searchMode == 0
+                      ? _buildDonorCard(d, color)
+                      : _buildOrgCard(d, color),
                 );
               }),
-            ] else if (!_isSearching) ...[
-              Center(child: Padding(
-                padding: const EdgeInsets.all(30),
-                child: Column(children: [
-                  Icon(Icons.search_rounded, size: 50, color: Colors.grey.shade200),
-                  const SizedBox(height: 12),
-                  Text('Search to find results', style: TextStyle(color: Colors.grey.shade400, fontSize: 15)),
-                ]),
-              )),
-            ],
+            ]
+            else if (!_isSearching && _hasSearched) ...[
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(30),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.search_off_rounded,
+                        size: 55,
+                        color: Colors.grey.shade300,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _searchMode == 0
+                            ? 'No donors found'
+                            : _searchMode == 1
+                            ? 'No blood bank found'
+                            : 'No hospital found',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]
+            else ...[
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(30),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.search_rounded,
+                          size: 50,
+                          color: Colors.grey.shade200,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Search to find results',
+                          style: TextStyle(
+                            color: Colors.grey.shade400,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
 
           ]),
         ),
@@ -437,7 +550,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     final active = _searchMode == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () { HapticFeedback.lightImpact(); setState(() { _searchMode = index; _results = []; _selectedBloodGroup = null; }); },
+        onTap: () { HapticFeedback.lightImpact(); setState(() { _searchMode = index; _results = []; _selectedBloodGroup = null; _hasSearched = false;_nameSearchCtrl.clear();_cityCtrl.clear();_filterState = null;_filterDistrict = null;_districts = []; }); },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           padding: const EdgeInsets.symmetric(vertical: 9),

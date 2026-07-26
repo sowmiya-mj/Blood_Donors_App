@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
 
+
 class RecipientHomeTab extends StatefulWidget {
   final Map<String, dynamic>? recipientData;
   final Color primaryColor;
@@ -54,45 +55,10 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
     super.dispose();
   }
 
-  Future<void> _sendSOS() async {
-    HapticFeedback.heavyImpact();
-    final data = widget.recipientData;
-    try {
-      await FirebaseFirestore.instance.collection('sos_requests').add({
-        'blood_group': data?['blood_group'] ?? 'Unknown',
-        'patient_name': data?['name'] ?? 'Unknown',
-        'city': data?['city'] ?? '',
-        'district': data?['district'] ?? '',
-        'state': data?['state'] ?? '',
-        'units': 1,
-        'status': 'active',
-        'requester_uid': FirebaseAuth.instance.currentUser?.uid,
-        'created_at': FieldValue.serverTimestamp(),
-      });
-      setState(() => _sosActive = true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 8),
-              Expanded(child: Text('SOS sent! Nearby donors have been notified.')),
-            ]),
-            backgroundColor: Colors.green.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send SOS: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
+
+
+  String _greeting() { final h = DateTime.now().hour; return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'; }
+
 
   @override
   Widget build(BuildContext context) {
@@ -123,28 +89,42 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
                   ),
                   borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
                 ),
-                child: Row(children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Hello, 👋', style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14)),
-                    const SizedBox(height: 4),
-                    Text(firstName, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
+                child: Column(children: [
+                  // BloodLink logo + tagline
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     Row(children: [
-                      Icon(Icons.location_on, color: Colors.white.withValues(alpha: 0.8), size: 14),
-                      const SizedBox(width: 4),
-                      Text(city, style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13)),
+                      Image.asset('assets/images/bloodlink_logo.png', height: 32, width: 32),
+                      const SizedBox(width: 8),
+                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('BloodLink',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                        Text('Your Blood. Someone\'s Tomorrow.',
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 9, letterSpacing: 0.3)),
+                      ]),
                     ]),
-                  ])),
-                  Container(
-                    width: 60, height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.2),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
-                    ),
-                    child: Center(child: Text(bloodGroup,
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
-                  ),
+                    Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
+                        child: Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
+                  ]),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Good ${_greeting()}, 👋', style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(firstName, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        Icon(Icons.location_on, color: Colors.white.withValues(alpha: 0.8), size: 14),
+                        const SizedBox(width: 4),
+                        Text(city, style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13)),
+                      ]),
+                    ])),
+                    Container(width: 60, height: 60,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.2),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2)),
+                        child: Center(child: Text(bloodGroup, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)))),
+                  ]),
                 ]),
               ),
             ),
@@ -239,22 +219,38 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('blood_banks')
+                      .where('district', isEqualTo: data?['district'])
                       .limit(3)
                       .snapshots(),
                   builder: (context, snapshot) {
+
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(
+                        height: 80,
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                      );
+                    }
+
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                       return _buildEmptyBloodBank(color);
                     }
+
                     return Column(
                       children: snapshot.data!.docs.asMap().entries.map((entry) {
                         final i = entry.key;
                         final bank = entry.value.data() as Map<String, dynamic>;
+
                         return TweenAnimationBuilder<double>(
                           tween: Tween(begin: 0, end: 1),
                           duration: Duration(milliseconds: 300 + i * 100),
                           builder: (context, val, child) => Opacity(
                             opacity: val,
-                            child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child),
+                            child: Transform.translate(
+                              offset: Offset(0, 20 * (1 - val)),
+                              child: child,
+                            ),
                           ),
                           child: _buildBloodBankCard(bank, color),
                         );
@@ -284,6 +280,18 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
                       .where('status', isEqualTo: 'active')
                       .snapshots(),
                   builder: (context, snapshot) {
+
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(
+                        height: 80,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                          ),
+                        ),
+                      );
+                    }
+
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                       return Container(
                         padding: const EdgeInsets.all(18),
@@ -291,14 +299,26 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Row(children: [
-                          Icon(Icons.inbox_rounded, color: Colors.grey.shade300, size: 28),
-                          const SizedBox(width: 12),
-                          Text('No active requests',
-                              style: TextStyle(color: Colors.grey.shade400, fontSize: 14)),
-                        ]),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.inbox_rounded,
+                              color: Colors.grey.shade300,
+                              size: 28,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'No active requests',
+                              style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     }
+
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final d = doc.data() as Map<String, dynamic>;
@@ -373,15 +393,10 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
         Icon(Icons.sos_rounded, color: Colors.red, size: 28),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${d['patient_name'] ?? 'Patient'} • ${d['blood_group'] ?? ''} blood',
+          Text('SOS • ${d['blood_group'] ?? ''} needed',
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
-          Text(
-            "${d['city'] ?? ''} • ${d['units'] ?? 1} unit${(d['units'] ?? 1) > 1 ? 's' : ''} needed",
-            style: TextStyle(
-              color: Colors.grey.shade500,
-              fontSize: 12,
-            ),
-          ),
+          Text('${d['city'] ?? ''} • Active',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
