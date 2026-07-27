@@ -6,6 +6,7 @@ import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import '../../screens/donor/donor_dashboard.dart';
 import '../../screens/recipient/recipient_dashboard.dart';
+import '../../screens/hospital/hospital_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -119,12 +120,15 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
   void _navigateToDashboard() {
     final role = widget.role.toLowerCase();
+
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => role == 'donor'
             ? const DonorDashboard()
-            : const RecipientDashboard(),
+            : role == 'recipient'
+            ? const RecipientDashboard()
+            : const HospitalDashboard(),
       ),
     );
   }

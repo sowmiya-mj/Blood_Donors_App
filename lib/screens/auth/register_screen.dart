@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../widgets/location_picker.dart';
 import '../donor/donor_dashboard.dart';
 import '../recipient/recipient_dashboard.dart';
+import '../hospital/hospital_dashboard.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String role;
@@ -321,6 +322,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             switch (role) {
               case 'donor': return const DonorDashboard();
               case 'recipient': return const RecipientDashboard();
+              case 'hospital': return const HospitalDashboard();
               default: return const DonorDashboard();
             }
           }),
