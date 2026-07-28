@@ -11,8 +11,6 @@ class HospitalProfileTab extends StatefulWidget {
   State<HospitalProfileTab> createState() => _HospitalProfileTabState();
 }
 
-
-
 class _HospitalProfileTabState extends State<HospitalProfileTab> with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
@@ -200,13 +198,5 @@ class _HospitalProfileTabState extends State<HospitalProfileTab> with SingleTick
   }
 }
 
-class _Info {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _Info(this.icon, this.label, this.value);
-}
-
-
+class _Info { final IconData icon; final String label; final String value; _Info(this.icon, this.label, this.value); }
 

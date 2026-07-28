@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' ;
+import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HospitalSearchTab extends StatefulWidget {
@@ -334,3 +334,4 @@ class _HospitalSearchTabState extends State<HospitalSearchTab>
         Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey.shade300, size: 16),
       ]));
 }
+

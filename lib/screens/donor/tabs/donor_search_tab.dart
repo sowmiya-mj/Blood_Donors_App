@@ -208,6 +208,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
                   builder: (_) => DraggableScrollableSheet(
+
                     initialChildSize: 0.85, maxChildSize: 0.95, minChildSize: 0.5,
                     builder: (_, __) => SOSBottomSheet(
                       userData: widget.donorData,

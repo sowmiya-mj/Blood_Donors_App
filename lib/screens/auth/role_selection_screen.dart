@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
 
+
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width > 700;
     return Scaffold(
       backgroundColor: const Color(0xffFAFAFA),
       appBar: AppBar(
@@ -62,43 +64,124 @@ class RoleSelectionScreen extends StatelessWidget {
 
                 const SizedBox(height: 40),
 
+
+
                 Expanded(
-                  child: GridView.count(
-                    crossAxisCount:
-                    MediaQuery.of(context).size.width > 700 ? 2 : 1,
-                    crossAxisSpacing: 20,
-                    mainAxisSpacing: 20,
-                    childAspectRatio: 2.3,
-                    children: [
-                      _roleCard(
-                        context,
-                        icon: Icons.volunteer_activism,
-                        title: "Donor",
-                        subtitle: "Donate Blood & Save Lives",
-                        color: Colors.red,
-                      ),
-                      _roleCard(
-                        context,
-                        icon: Icons.bloodtype,
-                        title: "Recipient",
-                        subtitle: "Find Blood Quickly",
-                        color: Colors.deepPurple,
-                      ),
-                      _roleCard(
-                        context,
-                        icon: Icons.local_hospital,
-                        title: "Hospital",
-                        subtitle: "Manage Emergency Requests",
-                        color: Colors.blue,
-                      ),
-                      _roleCard(
-                        context,
-                        icon: Icons.inventory_2,
-                        title: "Blood Bank",
-                        subtitle: "Manage Blood Stock",
-                        color: Colors.green,
-                      ),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isDesktop = constraints.maxWidth > 700;
+
+                      if (!isDesktop) {
+                        return GridView.count(
+                          crossAxisCount: 1,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                          childAspectRatio: 2.3,
+                          children: [
+                            _roleCard(
+                              context,
+                              icon: Icons.volunteer_activism,
+                              title: "Donor",
+                              subtitle: "Donate Blood & Save Lives",
+                              color: Colors.red,
+                            ),
+                            _roleCard(
+                              context,
+                              icon: Icons.bloodtype,
+                              title: "Recipient",
+                              subtitle: "Find Blood Quickly",
+                              color: Colors.deepPurple,
+                            ),
+                            _roleCard(
+                              context,
+                              icon: Icons.local_hospital,
+                              title: "Hospital",
+                              subtitle: "Manage Emergency Requests",
+                              color: Colors.blue,
+                            ),
+                            _roleCard(
+                              context,
+                              icon: Icons.inventory_2,
+                              title: "Blood Bank",
+                              subtitle: "Manage Blood Stock",
+                              color: Colors.green,
+                            ),
+                            _roleCard(
+                              context,
+                              icon: Icons.medical_services,
+                              title: "Doctor",
+                              subtitle: "Verify Patients & Coordinate Care",
+                              color: Colors.teal,
+                            ),
+                          ],
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 20,
+                          runSpacing: 20,
+                          children: [
+                            SizedBox(
+                              width: 400,
+                              height: 200,
+                              child: _roleCard(
+                                context,
+                                icon: Icons.volunteer_activism,
+                                title: "Donor",
+                                subtitle: "Donate Blood & Save Lives",
+                                color: Colors.red,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 400,
+                              height: 200,
+                              child: _roleCard(
+                                context,
+                                icon: Icons.bloodtype,
+                                title: "Recipient",
+                                subtitle: "Find Blood Quickly",
+                                color: Colors.deepPurple,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 400,
+                              height: 200,
+                              child: _roleCard(
+                                context,
+                                icon: Icons.local_hospital,
+                                title: "Hospital",
+                                subtitle: "Manage Emergency Requests",
+                                color: Colors.blue,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 400,
+                              height: 200,
+                              child: _roleCard(
+                                context,
+                                icon: Icons.inventory_2,
+                                title: "Blood Bank",
+                                subtitle: "Manage Blood Stock",
+                                color: Colors.green,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 400,
+                              height: 200,
+                              child: _roleCard(
+                                context,
+                                icon: Icons.medical_services,
+                                title: "Doctor",
+                                subtitle: "Verify Patients & Coordinate Care",
+                                color: Colors.teal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
