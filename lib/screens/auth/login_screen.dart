@@ -7,6 +7,7 @@ import 'forgot_password_screen.dart';
 import '../../screens/donor/donor_dashboard.dart';
 import '../../screens/recipient/recipient_dashboard.dart';
 import '../../screens/hospital/hospital_dashboard.dart';
+import '../../screens/doctor/doctor_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -84,6 +85,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       case 'recipient': return const Color(0xFF7B1FA2);
       case 'hospital': return const Color(0xFF1565C0);
       case 'blood bank': return const Color(0xFF2E7D32);
+      case 'doctor': return const Color(0xFF00796B);
       default: return const Color(0xFFE53935);
     }
   }
@@ -94,6 +96,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       case 'recipient': return Icons.bloodtype;
       case 'hospital': return Icons.local_hospital;
       case 'blood bank': return Icons.water_drop;
+      case 'doctor': return Icons.medical_services;
       default: return Icons.favorite;
     }
   }
@@ -104,6 +107,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       case 'recipient': return 'Find blood\nin minutes';
       case 'hospital': return 'Manage emergency\nrequests efficiently';
       case 'blood bank': return 'Connect donors\nwith recipients';
+      case 'doctor': return 'Prescribing Hope\nConnecting Care.';
       default: return 'Every drop\ncounts';
     }
   }
@@ -114,6 +118,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       case 'recipient': return 'recipients';
       case 'hospital': return 'hospitals';
       case 'blood bank': return 'blood_banks';
+      case 'doctor': return 'doctor';
       default: return 'donors';
     }
   }
