@@ -32,10 +32,10 @@ class RoleSelectionScreen extends StatelessWidget {
                 Text(
                   "Every drop Counts",
                   style: TextStyle(
-                    color: Colors.red.shade400,
-                    fontSize: 14,
-                    fontStyle: FontStyle.italic,
-                    fontWeight: FontWeight.w500
+                      color: Colors.red.shade400,
+                      fontSize: 14,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w500
                   ),
                 ),
 
