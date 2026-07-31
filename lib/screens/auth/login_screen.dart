@@ -8,6 +8,7 @@ import '../../screens/donor/donor_dashboard.dart';
 import '../../screens/recipient/recipient_dashboard.dart';
 import '../../screens/hospital/hospital_dashboard.dart';
 import '../../screens/doctor/doctor_dashboard.dart';
+import '../../screens/blood_bank/blood_bank_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -118,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       case 'recipient': return 'recipients';
       case 'hospital': return 'hospitals';
       case 'blood bank': return 'blood_banks';
-      case 'doctor': return 'doctor';
+      case 'doctor': return 'doctors';
       default: return 'donors';
     }
   }
@@ -129,11 +130,22 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => role == 'donor'
-            ? const DonorDashboard()
-            : role == 'recipient'
-            ? const RecipientDashboard()
-            : const HospitalDashboard(),
+        builder: (_) {
+          switch (role) {
+            case 'donor':
+              return const DonorDashboard();
+            case 'recipient':
+              return const RecipientDashboard();
+            case 'hospital':
+              return const HospitalDashboard();
+            // case 'doctor':
+            //   return const DoctorDashboard();
+            case 'blood bank':
+              return const BloodBankDashboard();
+            default:
+              return const HospitalDashboard();
+          }
+        },
       ),
     );
   }

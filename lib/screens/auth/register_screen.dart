@@ -6,6 +6,8 @@ import '../../widgets/location_picker.dart';
 import '../donor/donor_dashboard.dart';
 import '../recipient/recipient_dashboard.dart';
 import '../hospital/hospital_dashboard.dart';
+import '../blood_bank/blood_bank_dashboard.dart';
+import '../doctor/doctor_dashboard.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String role;
@@ -42,6 +44,9 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   final _nameCtrl = TextEditingController();
   final _orgNameCtrl = TextEditingController();
   final _licenseCtrl = TextEditingController();
+  final _websiteCtrl = TextEditingController();
+  final _specializationCtrl = TextEditingController();
+  final _affiliationCtrl = TextEditingController();
 
   DateTime? _selectedDOB;
   String? _selectedBloodGroup;
@@ -86,6 +91,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   void dispose() {
     _emailCtrl.dispose(); _passwordCtrl.dispose(); _confirmPasswordCtrl.dispose();
     _phoneCtrl.dispose(); _nameCtrl.dispose(); _orgNameCtrl.dispose(); _licenseCtrl.dispose();
+    _websiteCtrl.dispose(); _specializationCtrl.dispose(); _affiliationCtrl.dispose();
     _fadeController.dispose(); _heartController.dispose(); _shakeController.dispose();
     super.dispose();
   }
@@ -98,6 +104,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       case 'recipient': return const Color(0xFF7B1FA2);
       case 'hospital': return const Color(0xFF1565C0);
       case 'blood bank': return const Color(0xFF2E7D32);
+      case 'doctor': return const Color(0xFF00796B);
       default: return const Color(0xFFE53935);
     }
   }
@@ -108,6 +115,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       case 'recipient': return Icons.bloodtype;
       case 'hospital': return Icons.local_hospital;
       case 'blood bank': return Icons.water_drop;
+      case 'doctor': return Icons.medical_services;
       default: return Icons.favorite;
     }
   }
@@ -118,6 +126,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       case 'recipient': return 'Find blood\nin minutes';
       case 'hospital': return 'Manage emergency\nrequests efficiently';
       case 'blood bank': return 'Connect donors\nwith recipients';
+      case 'doctor': return 'Prescribing Hope\nConnecting Care.';
       default: return 'Every drop\ncounts';
     }
   }
@@ -181,10 +190,12 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       'recipients': 'Recipient',
       'hospitals': 'Hospital',
       'blood_banks': 'Blood Bank',
+      'doctors': 'Doctor',
     };
     final currentCollection = widget.role.toLowerCase() == 'donor' ? 'donors'
         : widget.role.toLowerCase() == 'recipient' ? 'recipients'
-        : widget.role.toLowerCase() == 'hospital' ? 'hospitals' : 'blood_banks';
+        : widget.role.toLowerCase() == 'hospital' ? 'hospitals'
+        : widget.role.toLowerCase() == 'blood bank' ? 'blood_banks' : 'doctors';
 
     for (final entry in collections.entries) {
       if (entry.key == currentCollection) continue;
@@ -238,7 +249,8 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
         // Check if already registered in THIS role
         final currentCol = role == 'donor' ? 'donors'
             : role == 'recipient' ? 'recipients'
-            : role == 'hospital' ? 'hospitals' : 'blood_banks';
+            : role == 'hospital' ? 'hospitals'
+            : role == 'blood bank' ? 'blood_banks' : 'doctors';
         final existingDoc = await _db.collection(currentCol).doc(uid).get();
         if (existingDoc.exists) {
           setState(() => errorMessage = 'This Google account is already registered as ${widget.role}. Please login instead.');
@@ -297,6 +309,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             ...baseData,
             'hospital_name': _orgNameCtrl.text.trim(),
             'license_no': _licenseCtrl.text.trim(),
+            'website': _websiteCtrl.text.trim(),
             'role': 'hospital',
             'verified': false,
           });
@@ -306,7 +319,20 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             ...baseData,
             'bank_name': _orgNameCtrl.text.trim(),
             'license_no': _licenseCtrl.text.trim(),
+            'website': _websiteCtrl.text.trim(),
             'role': 'blood_bank',
+            'verified': false,
+            'stock': {for (final g in _bloodGroups) g: 0},
+          });
+          break;
+        case 'doctor':
+          await _db.collection('doctors').doc(uid).set({
+            ...baseData,
+            'name': _nameCtrl.text.trim(),
+            'specialization': _specializationCtrl.text.trim(),
+            'affiliation': _affiliationCtrl.text.trim(),
+            'license_no': _licenseCtrl.text.trim(),
+            'role': 'doctor',
             'verified': false,
           });
           break;
@@ -323,6 +349,8 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               case 'donor': return const DonorDashboard();
               case 'recipient': return const RecipientDashboard();
               case 'hospital': return const HospitalDashboard();
+             // case 'doctor': return const DoctorDashboard();
+              case 'blood bank': return const BloodBankDashboard();
               default: return const DonorDashboard();
             }
           }),
@@ -650,6 +678,32 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               validator: (v) => v!.isEmpty ? 'Required' : null),
           const SizedBox(height: 16),
           _buildField(controller: _licenseCtrl, label: 'License Number', hint: 'LIC-2024-XXXXX',
+              icon: Icons.badge_outlined, color: color,
+              validator: (v) => v!.isEmpty ? 'Required' : null),
+          const SizedBox(height: 16),
+          _buildField(controller: _websiteCtrl, label: 'Website (optional)', hint: 'https://yourhospital.com',
+              icon: Icons.language_outlined, color: color, keyboardType: TextInputType.url,
+              validator: (v) {
+                if (v == null || v.isEmpty) return null; // optional
+                final urlPattern = RegExp(r'^(https?:\/\/)?([\w-]+\.)+[\w-]{2,}(\/\S*)?$');
+                return urlPattern.hasMatch(v) ? null : 'Enter a valid website URL';
+              }),
+        ];
+      case 'doctor':
+        return [
+          _buildField(controller: _nameCtrl, label: 'Full Name', hint: 'Dr. Your Name',
+              icon: Icons.person_outline, color: color,
+              validator: (v) => v!.isEmpty ? 'Required' : null),
+          const SizedBox(height: 16),
+          _buildField(controller: _specializationCtrl, label: 'Specialization', hint: 'Cardiologist, General Physician, etc.',
+              icon: Icons.medical_information_outlined, color: color,
+              validator: (v) => v!.isEmpty ? 'Required' : null),
+          const SizedBox(height: 16),
+          _buildField(controller: _affiliationCtrl, label: 'Hospital / Clinic Affiliation', hint: 'Apollo Hospital',
+              icon: Icons.local_hospital_outlined, color: color,
+              validator: (v) => v!.isEmpty ? 'Required' : null),
+          const SizedBox(height: 16),
+          _buildField(controller: _licenseCtrl, label: 'Medical License Number', hint: 'MCI-XXXXX',
               icon: Icons.badge_outlined, color: color,
               validator: (v) => v!.isEmpty ? 'Required' : null),
         ];
