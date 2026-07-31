@@ -185,7 +185,7 @@ class _BloodBankHomeTabState extends State<BloodBankHomeTab> with TickerProvider
                     final isLow = units < _lowStockThreshold;
                     final cardColor = isLow ? Colors.red : (units < 15 ? Colors.orange : Colors.green);
                     return Container(
-                      width: 110, height: 90,
+                      width: 135, height: 100,
                       decoration: BoxDecoration(
                         color: cardColor.shade50,
                         borderRadius: BorderRadius.circular(14),
