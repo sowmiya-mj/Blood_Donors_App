@@ -349,7 +349,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               case 'donor': return const DonorDashboard();
               case 'recipient': return const RecipientDashboard();
               case 'hospital': return const HospitalDashboard();
-             // case 'doctor': return const DoctorDashboard();
+              case 'doctor': return const DoctorDashboard();
               case 'blood bank': return const BloodBankDashboard();
               default: return const DonorDashboard();
             }

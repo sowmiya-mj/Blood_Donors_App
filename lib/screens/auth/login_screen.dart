@@ -138,8 +138,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
               return const RecipientDashboard();
             case 'hospital':
               return const HospitalDashboard();
-            // case 'doctor':
-            //   return const DoctorDashboard();
+             case 'doctor':
+               return const DoctorDashboard();
             case 'blood bank':
               return const BloodBankDashboard();
             default:
