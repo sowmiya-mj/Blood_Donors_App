@@ -79,8 +79,10 @@ class _DoctorProfileTabState extends State<DoctorProfileTab>
     final phone = data?['phone'] ?? '';
     final specialization = data?['specialization'] ?? 'N/A';
     final affiliation = data?['affiliation'] ?? '';
-    final license = data?['license_number'] ?? data?['license'] ?? '';
-    final city = data?['city'] ?? '';
+    final license = data?['license_no'] ??
+        data?['license_number'] ??
+        data?['license'] ??
+        '';    final city = data?['city'] ?? '';
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
 

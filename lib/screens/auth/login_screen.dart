@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import '../../screens/donor/donor_dashboard.dart';
@@ -124,6 +125,34 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     }
   }
 
+  // Silently refreshes a donor's last known location on every successful
+  // login. Never blocks or fails the login flow — if permission is denied
+  // or GPS is off, it just skips and the donor's registered city stays as
+  // the fallback for map/search. Only runs for the donor role.
+  void _captureDonorLocationSilently(String uid) async {
+    if (widget.role.toLowerCase() != 'donor') return;
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return;
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 8)),
+      );
+
+      await FirebaseFirestore.instance.collection('donors').doc(uid).update({
+        'last_lat': position.latitude,
+        'last_lng': position.longitude,
+        'location_updated_at': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Silent — GPS timeout, permission denial, etc. should never disrupt login.
+    }
+  }
+
   void _navigateToDashboard() {
     final role = widget.role.toLowerCase();
 
@@ -138,8 +167,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
               return const RecipientDashboard();
             case 'hospital':
               return const HospitalDashboard();
-             case 'doctor':
-               return const DoctorDashboard();
+            case 'doctor':
+              return const DoctorDashboard();
             case 'blood bank':
               return const BloodBankDashboard();
             default:
@@ -174,6 +203,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         return;
       }
 
+      _captureDonorLocationSilently(uid); // fire-and-forget, doesn't delay navigation
       if (mounted) _navigateToDashboard();
 
     } on FirebaseAuthException catch (e) {
@@ -187,6 +217,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           default: errorMessage = 'Login failed. Please try again';
         }
       });
+      _triggerShake();
+    } catch (e) {
+      // Catches Firestore permission-denied and any other non-auth errors
+      // so the screen never silently hangs.
+      setState(() => errorMessage = 'Something went wrong: $e');
       _triggerShake();
     } finally {
       setState(() => isLoading = false);
@@ -211,6 +246,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
       if (doc.exists) {
         // Already registered → Dashboard
+        _captureDonorLocationSilently(uid); // fire-and-forget
         _navigateToDashboard();
       } else {
         // New Google user → Register screen with pre-filled data

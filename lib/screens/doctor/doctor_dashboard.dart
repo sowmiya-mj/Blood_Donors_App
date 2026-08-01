@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'tabs/doctor_home_tab.dart';
 import 'tabs/doctor_search_tab.dart';
+import 'tabs/doctor_nearby_map_tab.dart';
 import 'tabs/doctor_profile_tab.dart';
 
 class DoctorDashboard extends StatefulWidget {
@@ -22,7 +23,8 @@ class _DoctorDashboardState extends State<DoctorDashboard> with TickerProviderSt
 
   final List<_NavItem> _navItems = [
     _NavItem(icon: Icons.home_rounded, label: 'Home'),
-    _NavItem(icon: Icons.search_rounded, label: 'Find Donors'),
+    _NavItem(icon: Icons.search_rounded, label: 'Find'),
+    _NavItem(icon: Icons.map_rounded, label: 'Nearby Map'),
     _NavItem(icon: Icons.person_rounded, label: 'Profile'),
   ];
 
@@ -30,7 +32,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> with TickerProviderSt
   void initState() {
     super.initState();
     _pageController = PageController();
-    _tabControllers = List.generate(3,
+    _tabControllers = List.generate(4,
             (i) => AnimationController(vsync: this, duration: const Duration(milliseconds: 200)));
     _tabControllers[0].forward();
     _fetchDoctorData();
@@ -46,24 +48,10 @@ class _DoctorDashboardState extends State<DoctorDashboard> with TickerProviderSt
   Future<void> _fetchDoctorData() async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) {
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      final doc = await FirebaseFirestore.instance
-          .collection('doctors')
-          .doc(uid)
-          .get();
-
-      setState(() {
-        _doctorData = doc.data();
-        _isLoading = false;
-      });
-    } catch (e) {
-      print("Doctor fetch error: $e");
-      setState(() => _isLoading = false);
-    }
+      if (uid == null) return;
+      final doc = await FirebaseFirestore.instance.collection('doctors').doc(uid).get();
+      if (doc.exists) setState(() { _doctorData = doc.data(); _isLoading = false; });
+    } catch (_) { setState(() => _isLoading = false); }
   }
 
   void _onTabTap(int index) {
@@ -93,6 +81,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> with TickerProviderSt
         children: [
           DoctorHomeTab(doctorData: _doctorData, primaryColor: _primaryColor, onNavigateToTab: _goToTab),
           DoctorSearchTab(doctorData: _doctorData, primaryColor: _primaryColor),
+          DoctorNearbyMapTab(doctorData: _doctorData, primaryColor: _primaryColor),
           DoctorProfileTab(doctorData: _doctorData, primaryColor: _primaryColor, onDataUpdated: _fetchDoctorData),
         ],
       ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 
 class DonorProfileTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -22,6 +24,7 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
+  bool _isUpdatingLocation = false;
 
   @override
   void initState() {
@@ -37,6 +40,57 @@ class _DonorProfileTabState extends State<DonorProfileTab>
   void dispose() {
     _fadeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _updateMyLocation() async {
+    if (_isUpdatingLocation) return;
+    HapticFeedback.lightImpact();
+    setState(() => _isUpdatingLocation = true);
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        _showLocationSnack('Location permission denied. Enable it in app settings to update.', isError: true);
+        return;
+      }
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _showLocationSnack('Turn on device location (GPS) and try again.', isError: true);
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 10)),
+      );
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      await FirebaseFirestore.instance.collection('donors').doc(uid).update({
+        'last_lat': position.latitude,
+        'last_lng': position.longitude,
+        'location_updated_at': FieldValue.serverTimestamp(),
+      });
+
+      _showLocationSnack('Location updated — nearby searches now use your current spot.');
+      widget.onDataUpdated();
+    } catch (e) {
+      _showLocationSnack('Could not fetch location. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _isUpdatingLocation = false);
+    }
+  }
+
+  void _showLocationSnack(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? Colors.red.shade600 : Colors.green.shade600,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
   }
 
   Future<void> _logout() async {
@@ -191,6 +245,31 @@ class _DonorProfileTabState extends State<DonorProfileTab>
                   _InfoItem(Icons.map_outlined, 'District', district),
                   _InfoItem(Icons.flag_outlined, 'State', state),
                 ], color),
+
+                const SizedBox(height: 10),
+
+                GestureDetector(
+                  onTap: _updateMyLocation,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: color.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(children: [
+                      _isUpdatingLocation
+                          ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: color))
+                          : Icon(Icons.my_location_rounded, color: color, size: 22),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Update My Location', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                        Text('Moved cities? Refresh so hospitals find you correctly',
+                            style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.7))),
+                      ])),
+                    ]),
+                  ),
+                ),
 
                 const SizedBox(height: 20),
 
