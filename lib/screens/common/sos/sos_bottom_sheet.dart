@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/location_picker.dart';
+import '../../../utils/geo_utils.dart';
 
 class SOSBottomSheet extends StatefulWidget {
   final Map<String, dynamic>? userData;
@@ -95,6 +96,11 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
     setState(() => _isSending = true);
 
     try {
+      // Geocode once at creation time so every viewer's radius filter can
+      // just do a distance calc — no need to re-geocode this request later.
+      final point = await GeoUtils.geocode('$_city, $_district, $_state');
+
+      final now = DateTime.now();
       await FirebaseFirestore.instance.collection('sos_requests').add({
         'blood_group': _selectedBloodGroup,
         'patient_name': _patientNameCtrl.text.trim(),
@@ -104,10 +110,18 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
         'city': _city,
         'district': _district,
         'state': _state,
+        'lat': point?.lat,
+        'lng': point?.lng,
         'units': _units,
         'status': 'active',
+        'accepted_by': null,
+        'accepted_by_name': null,
         'requester_uid': FirebaseAuth.instance.currentUser?.uid,
         'createdAt': FieldValue.serverTimestamp(),
+        // Client-computed expiry (72h) — read alongside serverTimestamp
+        // since we don't have Cloud Functions on the Spark plan to do
+        // this server-side. Good enough for a 72h window.
+        'expiresAt': Timestamp.fromDate(now.add(const Duration(hours: 72))),
       });
 
       if (mounted) {

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/notification_bell.dart';
+import '../../../widgets/nearby_sos_section.dart';
 
 class BloodBankHomeTab extends StatefulWidget {
   final Map<String, dynamic>? bankData;
@@ -202,66 +203,13 @@ class _BloodBankHomeTabState extends State<BloodBankHomeTab> with TickerProvider
 
             const SizedBox(height: 28),
 
-            // Nearby SOS requests
+            // Nearby SOS requests — radius-filtered (50km), shared across all roles
             FadeTransition(opacity: _cardFade, child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Nearby SOS Requests', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
                 const SizedBox(height: 12),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('sos_requests')
-                      .where('status', isEqualTo: 'active')
-                      .orderBy('createdAt', descending: true)
-                      .limit(5)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      // ignore: avoid_print
-                      print('SOS stream error: ${snapshot.error}');
-                      return Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(14)),
-                        child: Text(
-                          'Could not load SOS requests.\n${snapshot.error}',
-                          style: TextStyle(color: Colors.red.shade700, fontSize: 12),
-                        ),
-                      );
-                    }
-                    if (!snapshot.hasData) {
-                      return Center(child: CircularProgressIndicator(color: color, strokeWidth: 2));
-                    }
-                    final docs = snapshot.data!.docs;
-                    if (docs.isEmpty) {
-                      return _buildEmptyState('No active SOS requests', 'Emergency requests near you will show up here');
-                    }
-                    return Column(children: docs.map((doc) {
-                      final d = doc.data() as Map<String, dynamic>;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3))],
-                        ),
-                        child: Row(children: [
-                          Container(
-                            width: 44, height: 44,
-                            decoration: BoxDecoration(color: Colors.red.shade50, shape: BoxShape.circle),
-                            child: Center(child: Text(d['blood_group'] ?? '?',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red.shade600))),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(d['patient_name'] ?? 'Patient', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                            Text('${d['units'] ?? ''} units • ${d['city'] ?? ''}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                          ])),
-                        ]),
-                      );
-                    }).toList());
-                  },
-                ),
+                NearbySosSection(color: color, role: 'blood_bank', userData: widget.bankData),
               ]),
             )),
 

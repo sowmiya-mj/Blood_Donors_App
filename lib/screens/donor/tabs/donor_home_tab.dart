@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/notification_bell.dart';
+import '../../../widgets/nearby_sos_section.dart';
 
 class DonorHomeTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -192,69 +193,14 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
             ),
           )),
           const SizedBox(height: 16),
-          // SOS Nearby
+          // SOS Nearby — radius-filtered (50km), shared across all roles
           FadeTransition(opacity: _cardFade, child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('🚨 Nearby SOS Requests',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('sos_requests')
-                    .where('status', isEqualTo: 'active').limit(3).snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                      child: Row(children: [
-                        Icon(Icons.check_circle_outline, color: Colors.green.shade400, size: 28),
-                        const SizedBox(width: 12),
-                        Text('No active SOS requests nearby 🎉', style: TextStyle(color: Colors.grey.shade500, fontSize: 14)),
-                      ]),
-                    );
-                  }
-                  return Column(children: snapshot.data!.docs.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final isMyRequest = data['requester_uid'] ==
-                        FirebaseAuth.instance.currentUser?.uid;
-                    return ScaleTransition(scale: _sosPulse, child: Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.red.shade200)),
-                      child: Row(children: [
-                        Container(padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
-                            child: Text(data['blood_group'] ?? 'O+',
-                                style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13))),
-                        const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(data['patient_name'] ?? 'Patient',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                          Text('${data['city'] ?? ''} • ${data['units'] ?? '1'} unit needed',
-                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                        ])),
-                        isMyRequest
-                            ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(8)),
-                            child: Text('Active',
-                                style: TextStyle(color: Colors.orange.shade700,
-                                    fontSize: 11, fontWeight: FontWeight.w600)))
-                            : ElevatedButton(onPressed: () {},
-                            style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                            child: const Text('Help', style: TextStyle(fontSize: 12))),
-                      ]),
-                    ));
-                  }).toList());
-                },
-              ),
+              NearbySosSection(color: color, role: 'donor', userData: widget.donorData),
             ]),
           )),
           const SizedBox(height: 16),
