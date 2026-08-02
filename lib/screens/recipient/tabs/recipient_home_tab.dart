@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
+import '../../../widgets/notification_bell.dart';
 
 
 class RecipientHomeTab extends StatefulWidget {
@@ -102,10 +103,7 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
                             style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 9, letterSpacing: 0.3)),
                       ]),
                     ]),
-                    Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
-                        child: Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
+                    NotificationBell(uid: FirebaseAuth.instance.currentUser!.uid, primaryColor: Colors.white),
                   ]),
                   const SizedBox(height: 16),
                   Row(children: [

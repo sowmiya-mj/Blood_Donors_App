@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class BloodBankSearchTab extends StatefulWidget {
   final Map<String, dynamic>? bankData;
@@ -22,7 +25,14 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
   bool _isSearching = false;
   bool _hasSearched = false;
   bool _showFilters = false;
+  bool _showMap = false;
+  bool _isGeocoding = false;
   List<Map<String, dynamic>> _results = [];
+
+  // Geocoded pins: "city, district, state" -> LatLng
+  final Map<String, LatLng> _geocodeCache = {};
+  List<_LocationCluster> _clusters = [];
+  final MapController _mapController = MapController();
 
   // Location filters from JSON
   Map<String, dynamic> _locationData = {};
@@ -95,7 +105,7 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
       return;
     }
 
-    setState(() { _hasSearched = true; _isSearching = true; _results = []; });
+    setState(() { _hasSearched = true; _isSearching = true; _results = []; _clusters = []; });
 
     final myUid = FirebaseAuth.instance.currentUser?.uid;
 
@@ -124,6 +134,7 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
         }
 
         setState(() => _results = results);
+        if (results.isNotEmpty) _geocodeResults(results);
 
       } else {
         // Search blood banks or hospitals
@@ -165,10 +176,78 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
         }
 
         setState(() => _results = results);
+        if (results.isNotEmpty) _geocodeResults(results);
       }
     } catch (_) {} finally {
       setState(() => _isSearching = false);
     }
+  }
+
+  // Groups results by location and geocodes each unique spot via Nominatim.
+  // Donors that have a fresh last_lat/last_lng (captured at their last login)
+  // use that directly — more accurate than the static registered city.
+  Future<void> _geocodeResults(List<Map<String, dynamic>> results) async {
+    setState(() => _isGeocoding = true);
+
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    final Map<String, LatLng> directPoints = {};
+
+    for (final d in results) {
+      final lat = d['last_lat'];
+      final lng = d['last_lng'];
+      final key = [d['city'], d['district'], d['state']]
+          .where((e) => e != null && e.toString().isNotEmpty).join(', ');
+      if (key.isEmpty) continue;
+
+      if (_searchMode == 0 && lat is num && lng is num) {
+        // Use each donor's own live point rather than clustering by city text,
+        // since last_lat/last_lng can differ donor to donor even in the same city.
+        final pointKey = '$key#${d['uid'] ?? d['email'] ?? results.indexOf(d)}';
+        directPoints[pointKey] = LatLng(lat.toDouble(), lng.toDouble());
+        grouped.putIfAbsent(pointKey, () => []).add(d);
+      } else {
+        grouped.putIfAbsent(key, () => []).add(d);
+      }
+    }
+
+    final List<_LocationCluster> clusters = [];
+    for (final entry in grouped.entries) {
+      LatLng? point = directPoints[entry.key] ?? _geocodeCache[entry.key];
+      if (point == null) {
+        point = await _geocodeLocation(entry.key.split('#').first);
+        if (point != null) _geocodeCache[entry.key] = point;
+        await Future.delayed(const Duration(milliseconds: 1100));
+      }
+      if (point != null) {
+        clusters.add(_LocationCluster(label: entry.key.split('#').first, point: point, donors: entry.value));
+      }
+    }
+
+    if (!mounted) return;
+    setState(() { _clusters = clusters; _isGeocoding = false; });
+
+    if (clusters.isNotEmpty && _showMap) {
+      Future.delayed(const Duration(milliseconds: 200), () {
+        _mapController.move(clusters.first.point, 6.5);
+      });
+    }
+  }
+
+  Future<LatLng?> _geocodeLocation(String query) async {
+    try {
+      final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=${Uri.encodeComponent(query)}');
+      final res = await http.get(uri, headers: {'User-Agent': 'BloodLinkApp/1.0'});
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        if (data.isNotEmpty) {
+          final lat = double.tryParse(data[0]['lat'].toString());
+          final lon = double.tryParse(data[0]['lon'].toString());
+          if (lat != null && lon != null) return LatLng(lat, lon);
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   void _clearFilters() => setState(() {
@@ -178,6 +257,7 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
     _cityCtrl.clear();
     _nameSearchCtrl.clear();
     _results.clear();
+    _clusters.clear();
     _hasSearched = false;
   });
 
@@ -417,34 +497,43 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
 
             // Results
             if (_results.isNotEmpty) ...[
-              Text(
-                '${_results.length} result${_results.length > 1 ? 's' : ''} found',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 12),
-              ..._results.asMap().entries.map((entry) {
-                final i = entry.key;
-                final d = entry.value;
-
-                return TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: 1),
-                  duration: Duration(milliseconds: 300 + i * 60),
-                  builder: (context, val, child) => Opacity(
-                    opacity: val,
-                    child: Transform.translate(
-                      offset: Offset(0, 20 * (1 - val)),
-                      child: child,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${_results.length} result${_results.length > 1 ? 's' : ''} found',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  child: _searchMode == 0
-                      ? _buildDonorCard(d, color)
-                      : _buildOrgCard(d, color),
-                );
-              }),
+                  _buildViewToggle(color),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_showMap)
+                _buildMapView(color)
+              else
+                ..._results.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final d = entry.value;
+
+                  return TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: Duration(milliseconds: 300 + i * 60),
+                    builder: (context, val, child) => Opacity(
+                      opacity: val,
+                      child: Transform.translate(
+                        offset: Offset(0, 20 * (1 - val)),
+                        child: child,
+                      ),
+                    ),
+                    child: _searchMode == 0
+                        ? _buildDonorCard(d, color)
+                        : _buildOrgCard(d, color),
+                  );
+                }),
             ]
             else if (!_isSearching && _hasSearched) ...[
               Center(
@@ -510,7 +599,7 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
     final active = _searchMode == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () { HapticFeedback.lightImpact(); setState(() { _searchMode = index; _results = []; _selectedBloodGroup = null;  _hasSearched = false;_nameSearchCtrl.clear();_cityCtrl.clear();_filterState = null;_filterDistrict = null;_districts = []; }); },
+        onTap: () { HapticFeedback.lightImpact(); setState(() { _searchMode = index; _results = []; _clusters = []; _selectedBloodGroup = null;  _hasSearched = false;_nameSearchCtrl.clear();_cityCtrl.clear();_filterState = null;_filterDistrict = null;_districts = []; }); },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           padding: const EdgeInsets.symmetric(vertical: 9),
@@ -525,6 +614,98 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
                     color: active ? Colors.white : Colors.grey.shade500)),
           ]),
         ),
+      ),
+    );
+  }
+
+  Widget _buildViewToggle(Color color) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        _viewToggleBtn(Icons.list_rounded, !_showMap, color, () => setState(() => _showMap = false)),
+        _viewToggleBtn(Icons.map_rounded, _showMap, color, () => setState(() => _showMap = true)),
+      ]),
+    );
+  }
+
+  Widget _viewToggleBtn(IconData icon, bool active, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: () { HapticFeedback.lightImpact(); onTap(); },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(color: active ? color : Colors.transparent, borderRadius: BorderRadius.circular(8)),
+        child: Icon(icon, size: 18, color: active ? Colors.white : Colors.grey.shade500),
+      ),
+    );
+  }
+
+  Widget _buildMapView(Color color) {
+    if (_isGeocoding) {
+      return Container(
+        height: 320, alignment: Alignment.center,
+        decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(16)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          CircularProgressIndicator(color: color, strokeWidth: 2),
+          const SizedBox(height: 12),
+          Text('Locating on map…', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+        ]),
+      );
+    }
+
+    if (_clusters.isEmpty) {
+      return Container(
+        height: 200, alignment: Alignment.center,
+        decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(16)),
+        child: Text('Could not locate results on map', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: SizedBox(
+        height: 380,
+        child: FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(initialCenter: _clusters.first.point, initialZoom: 6.5),
+          children: [
+            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.bloodlink.app'),
+            MarkerLayer(markers: _clusters.map((c) => Marker(
+              point: c.point,
+              width: 46, height: 46,
+              child: GestureDetector(
+                onTap: () => _showClusterSheet(c, color),
+                child: Container(
+                  decoration: BoxDecoration(
+                      color: color, shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 6)]),
+                  child: Center(child: Text('${c.donors.length}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))),
+                ),
+              ),
+            )).toList()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showClusterSheet(_LocationCluster cluster, Color color) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(cluster.label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+          const SizedBox(height: 4),
+          Text('${cluster.donors.length} result${cluster.donors.length > 1 ? 's' : ''}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          const SizedBox(height: 14),
+          ...cluster.donors.map((d) => _searchMode == 0 ? _buildDonorCard(d, color) : _buildOrgCard(d, color)),
+        ]),
       ),
     );
   }
@@ -605,4 +786,11 @@ class _BloodBankSearchTabState extends State<BloodBankSearchTab>
       ]),
     );
   }
+}
+
+class _LocationCluster {
+  final String label;
+  final LatLng point;
+  final List<Map<String, dynamic>> donors;
+  _LocationCluster({required this.label, required this.point, required this.donors});
 }

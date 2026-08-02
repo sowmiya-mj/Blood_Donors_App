@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../widgets/notification_bell.dart';
 
 class HospitalHomeTab extends StatefulWidget {
   final Map<String, dynamic>? hospitalData;
@@ -68,10 +69,7 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                           style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 9, letterSpacing: 0.3)),
                     ]),
                   ]),
-                  Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
-                      child: const Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
+                  NotificationBell(uid: FirebaseAuth.instance.currentUser!.uid, primaryColor: Colors.white),
                 ]),
                 const SizedBox(height: 16),
                 // Hospital info

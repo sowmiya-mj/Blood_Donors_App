@@ -107,7 +107,7 @@ class _SOSBottomSheetState extends State<SOSBottomSheet>
         'units': _units,
         'status': 'active',
         'requester_uid': FirebaseAuth.instance.currentUser?.uid,
-        'created_at': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
       if (mounted) {

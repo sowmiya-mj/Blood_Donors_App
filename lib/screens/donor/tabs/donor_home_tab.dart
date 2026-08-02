@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../widgets/notification_bell.dart';
 
 class DonorHomeTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -106,10 +107,7 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
                     ]),
                   ]),
                   // Notification bell placeholder
-                  Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
-                      child: Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
+                  NotificationBell(uid: FirebaseAuth.instance.currentUser!.uid, primaryColor: Colors.white),
                 ]),
                 const SizedBox(height: 16),
                 // User greeting row
