@@ -61,8 +61,8 @@ class NotificationListScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.redAccent,
+        foregroundColor: primaryColor,
         title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           TextButton(
@@ -75,11 +75,14 @@ class NotificationListScreen extends StatelessWidget {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
+
         stream: NotificationService.notificationsStream(uid),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return Center(child: CircularProgressIndicator(color: primaryColor));
           }
+
+
 
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) {
@@ -95,6 +98,7 @@ class NotificationListScreen extends StatelessWidget {
               ),
             );
           }
+
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),

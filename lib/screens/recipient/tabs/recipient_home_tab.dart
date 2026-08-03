@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
 import '../../../widgets/notification_bell.dart';
+import '../../../widgets/nearby_sos_section.dart';
 
 
 class RecipientHomeTab extends StatefulWidget {
@@ -270,60 +271,11 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('My Active Requests',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                const SizedBox(height: 12),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('sos_requests')
-                      .where('requester_uid', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-                      .where('status', isEqualTo: 'active')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const SizedBox(
-                        height: 80,
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                          ),
-                        ),
-                      );
-                    }
-
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.inbox_rounded,
-                              color: Colors.grey.shade300,
-                              size: 28,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'No active requests',
-                              style: TextStyle(
-                                color: Colors.grey.shade400,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    return Column(
-                      children: snapshot.data!.docs.map((doc) {
-                        final d = doc.data() as Map<String, dynamic>;
-                        return _buildRequestCard(d, color);
-                      }).toList(),
-                    );
-                  },
+                NearbySosSection(
+                  color: color,
+                  role: 'recipient',
+                  userData: widget.recipientData,
+                  onlyMine: true,
                 ),
               ]),
             ),
