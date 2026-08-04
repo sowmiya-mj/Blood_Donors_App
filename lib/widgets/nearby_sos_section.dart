@@ -16,13 +16,24 @@ import '../utils/blood_compatibility.dart';
 /// - everyone else gets a "View" button (details sheet, no accept action —
 ///   only donors donate; Hospital/Blood Bank coordination is a later phase).
 /// - the request owner (any role) sees a "Mark Fulfilled" action instead.
+///
+/// MULTI-DONOR MODEL:
+/// A request needs `units` donors (default 1). Each donor who accepts gets
+/// their own doc in the `sos_requests/{id}/acceptances/{donorUid}`
+/// subcollection instead of a single `accepted_by` field on the parent —
+/// so more than one donor can help the same request. `units_fulfilled` on
+/// the parent doc mirrors the acceptance count (kept in sync inside the
+/// same transaction) purely so list queries / cards don't need to read the
+/// subcollection just to know "is this full yet". Status auto-flips to
+/// 'fulfilled' once units_fulfilled >= units, and reopens to 'active' if a
+/// donor cancels and drops it back below that.
 class NearbySosSection extends StatefulWidget {
   final Color color;
   final String role;
   final Map<String, dynamic>? userData;
   final double radiusKm;
   // When true: only shows the current user's own active SOS requests
-  // (with the "Call donor" / "Mark done" actions), and skips the
+  // (with the donor-list + "Mark done" actions), and skips the
   // location/radius lookup entirely since it isn't needed. Use this for
   // roles that create SOS requests but never accept/help others' —
   // e.g. Recipient — so they still get full status on their own request
@@ -111,6 +122,21 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     SharePlus.instance.share(ShareParams(text: text));
   }
 
+  static int _asInt(dynamic v, {int fallback = 1}) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? fallback;
+  }
+
+  /// Accept flow — now writes to the acceptances subcollection instead of
+  /// a single accepted_by field, so multiple donors can help one request.
+  /// Transaction guarantees: re-reads units_fulfilled fresh, checks this
+  /// donor hasn't already accepted, checks there's still a slot open, then
+  /// creates the acceptance doc + bumps units_fulfilled (+ flips status to
+  /// 'fulfilled' if that was the last slot) — all atomically. Two donors
+  /// tapping "Help" on the last open slot at the same instant can't both
+  /// succeed; whichever transaction commits first wins, the other retries
+  /// and sees the slot is gone.
   Future<void> _helpSos(String requestId, Map<String, dynamic> requestData) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -118,30 +144,36 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     setState(() => _accepting.add(requestId));
 
     final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
+    final acceptanceRef = docRef.collection('acceptances').doc(uid);
     final myName = widget.userData?['name'] ?? 'A donor';
+    final myPhone = widget.userData?['phone'] ?? '';
 
     try {
-      // Transaction guarantees only the first tap wins — reads accepted_by
-      // and writes in one atomic step, so two donors tapping "Help" at the
-      // same instant can't both succeed.
-      // Timeout wrapped so a blocked/denied write can NEVER spin forever —
-      // worst case, after 10s we surface an error instead.
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(docRef);
         if (!snap.exists) throw 'gone';
         final data = snap.data() as Map<String, dynamic>;
-        if (data['accepted_by'] != null) throw 'taken';
-        tx.update(docRef, {
-          'accepted_by': uid,
-          'accepted_by_name': myName,
-          'accepted_by_phone': widget.userData?['phone'] ?? '',
+
+        final alreadyMine = await tx.get(acceptanceRef);
+        if (alreadyMine.exists) throw 'already';
+
+        final unitsNeeded = _asInt(data['units']);
+        final unitsFulfilled = _asInt(data['units_fulfilled'], fallback: 0);
+        if (unitsFulfilled >= unitsNeeded) throw 'full';
+
+        final newFulfilled = unitsFulfilled + 1;
+        tx.set(acceptanceRef, {
+          'donor_name': myName,
+          'donor_phone': myPhone,
           'accepted_at': FieldValue.serverTimestamp(),
+        });
+        tx.update(docRef, {
+          'units_fulfilled': newFulfilled,
+          if (newFulfilled >= unitsNeeded) 'status': 'fulfilled',
         });
       }).timeout(const Duration(seconds: 10));
 
       // Best-effort notification — matches the notifications/{uid}/items schema.
-      // If your NotificationService has a different send() signature, swap
-      // this block for a call to it instead.
       final requesterUid = requestData['requester_uid'];
       if (requesterUid != null) {
         FirebaseFirestore.instance
@@ -170,12 +202,14 @@ class _NearbySosSectionState extends State<NearbySosSection> {
       print('SOS accept error: $e');
       if (mounted) {
         String msg;
-        if (e.toString().contains('taken')) {
-          msg = 'Someone already accepted this request';
+        if (e.toString().contains('already')) {
+          msg = "You've already accepted this request";
+        } else if (e.toString().contains('full')) {
+          msg = 'All units for this request are already covered';
         } else if (e is TimeoutException) {
           msg = 'Timed out — check Firestore rules allow this update';
         } else if (e.toString().contains('permission-denied')) {
-          msg = 'Permission denied — Firestore rules need to allow other users to update accepted_by';
+          msg = 'Permission denied — check Firestore rules for acceptances';
         } else {
           msg = 'Could not accept: $e';
         }
@@ -232,6 +266,9 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     );
   }
 
+  /// Cancel flow — removes THIS donor's acceptance doc only (other donors
+  /// on the same request are untouched), decrements units_fulfilled, and
+  /// reopens the request to 'active' if it had been marked 'fulfilled'.
   Future<void> _cancelHelp(String requestId) async {
     HapticFeedback.lightImpact();
     final confirm = await showDialog<bool>(
@@ -239,7 +276,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text("Can't make it?", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('This will reopen the request for other donors, and the requester will be notified.'),
+        content: const Text('This will free up your slot for other donors, and the requester will be notified.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false),
               child: Text('Stay committed', style: TextStyle(color: Colors.grey.shade600))),
@@ -252,17 +289,34 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     );
     if (confirm != true) return;
 
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
     final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
+    final acceptanceRef = docRef.collection('acceptances').doc(uid);
+
     try {
-      final snap = await docRef.get();
-      final data = snap.data();
-      await docRef.update({'accepted_by': null, 'accepted_by_name': null, 'accepted_by_phone': null});
-      final requesterUid = data?['requester_uid'];
+      String? requesterUid;
+      String bloodGroup = '';
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) return;
+        final data = snap.data() as Map<String, dynamic>;
+        requesterUid = data['requester_uid'];
+        bloodGroup = (data['blood_group'] ?? '').toString();
+        final unitsFulfilled = _asInt(data['units_fulfilled'], fallback: 0);
+        final newFulfilled = (unitsFulfilled - 1) < 0 ? 0 : unitsFulfilled - 1;
+        tx.delete(acceptanceRef);
+        tx.update(docRef, {
+          'units_fulfilled': newFulfilled,
+          'status': 'active', // always reopens — a cancellation means a slot is free again
+        });
+      });
+
       if (requesterUid != null) {
         FirebaseFirestore.instance.collection('notifications').doc(requesterUid).collection('items').add({
           'type': 'sos_cancelled',
           'title': 'Donor unavailable 😔',
-          'message': 'Your accepted donor had to back out. The request is open again.',
+          'message': 'A donor had to back out of your $bloodGroup request. A slot is open again.',
           'read': false,
           'createdAt': FieldValue.serverTimestamp(),
         }).catchError((_) {});
@@ -421,7 +475,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
   // "My requests only" mode — no radius/distance needed, so we query
   // directly by requester_uid instead of pulling every active SOS and
   // filtering client-side. Reuses the same card (isMine: true) so the
-  // Call-donor / Mark-done actions behave identically to the Donor tab.
+  // donor-list / Mark-done actions behave identically to the Donor tab.
   Widget _buildOnlyMine(Color color, String? myUid) {
     if (myUid == null) return const SizedBox.shrink();
 
@@ -452,127 +506,159 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     );
   }
 
+  /// Wraps the card in a StreamBuilder on the acceptances subcollection so
+  /// it always reflects the live donor list / fulfilled count, without the
+  /// parent card widget needing to know about it.
   Widget _buildSosCard(_SosItem item, {required bool isMine, required String? myUid, required Color color}) {
-    final acceptedBy = item.data['accepted_by'];
-    final isAccepting = _accepting.contains(item.id);
-    final iAmHelping = acceptedBy != null && acceptedBy == myUid;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('sos_requests')
+          .doc(item.id)
+          .collection('acceptances')
+          .orderBy('accepted_at')
+          .snapshots(),
+      builder: (context, accSnap) {
+        final acceptanceDocs = accSnap.data?.docs ?? const [];
+        final unitsNeeded = _asInt(item.data['units']);
+        final unitsFulfilled = acceptanceDocs.length;
+        final isFull = unitsFulfilled >= unitsNeeded;
+        final iAmHelping = myUid != null && acceptanceDocs.any((d) => d.id == myUid);
+        final isAccepting = _accepting.contains(item.id);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.red.shade200),
-      ),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
-          child: Text(item.data['blood_group'] ?? '?',
-              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(item.data['patient_name'] ?? 'Patient',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          const SizedBox(height: 2),
-          // Distance to yourself is meaningless — only show it for other
-          // people's requests, not your own.
-          Text(isMine
-              ? '${item.data['units'] ?? 1} unit needed'
-              : '${item.distance.toStringAsFixed(1)} km away • ${item.data['units'] ?? 1} unit needed',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-        ])),
-        const SizedBox(width: 8),
-        if (isMine)
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            GestureDetector(
-              onTap: () => _deactivateSos(item.id),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Text(acceptedBy != null ? 'Accepted • Mark done' : 'Active • Mark done',
-                    style: TextStyle(color: Colors.orange.shade700, fontSize: 11, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            if (acceptedBy != null) ...[
-              const SizedBox(height: 6),
-              GestureDetector(
-                onTap: () => _callPhone(item.data['accepted_by_phone'] ?? ''),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.call, size: 12, color: color),
-                  const SizedBox(width: 3),
-                  Text('Call ${item.data['accepted_by_name'] ?? 'donor'}',
-                      style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
-                ]),
-              ),
-            ],
-          ])
-        else if (widget.role == 'donor')
-          iAmHelping
-              ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
-              child: Text("You're helping", style: TextStyle(color: Colors.green.shade700, fontSize: 11, fontWeight: FontWeight.w600)),
-            ),
-            const SizedBox(height: 6),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              GestureDetector(
-                onTap: () => _callPhone(item.data['phone'] ?? ''),
-                child: Icon(Icons.call, size: 16, color: color),
-              ),
-              const SizedBox(width: 10),
-              GestureDetector(
-                onTap: () => _cancelHelp(item.id),
-                child: Text('Cancel', style: TextStyle(color: Colors.red.shade400, fontSize: 10, fontWeight: FontWeight.w600)),
-              ),
-            ]),
-          ])
-              : acceptedBy != null
-              ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(8)),
-              child: Text('Accepted', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.w600)))
-              : BloodCompatibility.canDonate(
-            (widget.userData?['blood_group'] ?? '').toString(),
-            (item.data['blood_group'] ?? '').toString(),
-          )
-              ? ElevatedButton(
-              onPressed: isAccepting ? null : () => _showHelpConfirmation(item.id, item.data),
-              style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white,
-                  disabledBackgroundColor: color.withValues(alpha: 0.6), disabledForegroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-              child: isAccepting
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Help', style: TextStyle(fontSize: 12)))
-          // Blood group isn't compatible — this donor can't safely give
-          // blood for this request, but can still spread the word.
-              : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('Not a match', style: TextStyle(color: Colors.grey.shade400, fontSize: 9, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 4),
-            OutlinedButton(
-              onPressed: () => _showDetailsSheet(item.data, item.distance),
-              style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-              child: const Text('Notify', style: TextStyle(fontSize: 12)),
-            ),
-          ])
-        else
-          OutlinedButton(
-            onPressed: () => _showDetailsSheet(item.data, item.distance),
-            style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-            child: const Text('View', style: TextStyle(fontSize: 12)),
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.red.shade50,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.red.shade200),
           ),
-      ]),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
+                child: Text(item.data['blood_group'] ?? '?',
+                    style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(item.data['patient_name'] ?? 'Patient',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 2),
+                // Distance to yourself is meaningless — only show it for other
+                // people's requests, not your own. Progress replaces the old
+                // "N unit needed" text with a live "X/Y donors found" count.
+                Text(isMine
+                    ? '$unitsFulfilled/$unitsNeeded donors found'
+                    : '${item.distance.toStringAsFixed(1)} km away • $unitsFulfilled/$unitsNeeded donors found',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              ])),
+              const SizedBox(width: 8),
+              if (isMine)
+                GestureDetector(
+                  onTap: () => _deactivateSos(item.id),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Text(unitsFulfilled > 0 ? 'Mark done' : 'Active • Mark done',
+                        style: TextStyle(color: Colors.orange.shade700, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ),
+                )
+              else if (widget.role == 'donor')
+                iAmHelping
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Text("You're helping", style: TextStyle(color: Colors.green.shade700, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    GestureDetector(
+                      onTap: () => _callPhone(item.data['phone'] ?? ''),
+                      child: Icon(Icons.call, size: 16, color: color),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () => _cancelHelp(item.id),
+                      child: Text('Cancel', style: TextStyle(color: Colors.red.shade400, fontSize: 10, fontWeight: FontWeight.w600)),
+                    ),
+                  ]),
+                ])
+                    : isFull
+                    ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(8)),
+                    child: Text('Fulfilled ✅', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.w600)))
+                    : BloodCompatibility.canDonate(
+                  (widget.userData?['blood_group'] ?? '').toString(),
+                  (item.data['blood_group'] ?? '').toString(),
+                )
+                    ? ElevatedButton(
+                    onPressed: isAccepting ? null : () => _showHelpConfirmation(item.id, item.data),
+                    style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white,
+                        disabledBackgroundColor: color.withValues(alpha: 0.6), disabledForegroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    child: isAccepting
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Help', style: TextStyle(fontSize: 12)))
+                // Blood group isn't compatible — this donor can't safely give
+                // blood for this request, but can still spread the word.
+                    : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('Not a match', style: TextStyle(color: Colors.grey.shade400, fontSize: 9, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  OutlinedButton(
+                    onPressed: () => _showDetailsSheet(item.data, item.distance),
+                    style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    child: const Text('Notify', style: TextStyle(fontSize: 12)),
+                  ),
+                ])
+              else
+                OutlinedButton(
+                  onPressed: () => _showDetailsSheet(item.data, item.distance),
+                  style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                  child: const Text('View', style: TextStyle(fontSize: 12)),
+                ),
+            ]),
+            // Donor list — only the requester (isMine) needs to see who's
+            // coming and be able to call them. Others just see the count above.
+            if (isMine && acceptanceDocs.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              ...acceptanceDocs.map((doc) {
+                final d = doc.data() as Map<String, dynamic>;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    Icon(Icons.check_circle, size: 14, color: Colors.green.shade400),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(d['donor_name'] ?? 'Donor',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+                    GestureDetector(
+                      onTap: () => _callPhone(d['donor_phone'] ?? ''),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.call, size: 12, color: color),
+                        const SizedBox(width: 3),
+                        Text('Call', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ]),
+                );
+              }),
+            ],
+          ]),
+        );
+      },
     );
   }
 
