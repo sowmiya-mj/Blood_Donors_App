@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,12 +14,27 @@ class DonorHistoryTab extends StatefulWidget {
 }
 
 class _DonorHistoryTabState extends State<DonorHistoryTab>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
 
+  // Badge celebration shower — fires once per NEW badge crossed, not on
+  // every rebuild. We track the last count we've already celebrated for
+  // so a stream re-emit (e.g. from an unrelated field change) doesn't
+  // replay the shower.
+  late AnimationController _showerController;
+  bool _showering = false;
+  int? _lastSeenCount;
+
   final List<String> _donationTypes = [
     'Whole Blood', 'Platelets', 'Plasma', 'Double Red Cells'
+  ];
+
+  static const List<Map<String, Object>> _badges = [
+    {'icon': '🏅', 'label': '1st Donation', 'target': 1},
+    {'icon': '⭐', 'label': '3 Donations', 'target': 3},
+    {'icon': '🏆', 'label': '5 Donations', 'target': 5},
+    {'icon': '💎', 'label': '10 Donations', 'target': 10},
   ];
 
   @override
@@ -28,15 +44,53 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
         vsync: this, duration: const Duration(milliseconds: 600));
     _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
     _fadeController.forward();
+
+    _showerController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1800));
   }
 
   @override
   void dispose() {
     _fadeController.dispose();
+    _showerController.dispose();
     super.dispose();
   }
 
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  // Checks whether `count` newly crosses a badge target that the
+  // previous known count hadn't reached yet. Called from inside the
+  // StreamBuilder — schedules the actual setState for AFTER the current
+  // build finishes (can't setState mid-build).
+  void _maybeCelebrate(int count) {
+    if (_lastSeenCount == null) {
+      // First build this session — just remember where we are, don't
+      // celebrate for donations that were already there before we opened
+      // this screen.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _lastSeenCount = count);
+      });
+      return;
+    }
+    if (count <= _lastSeenCount!) return;
+
+    final crossedNewBadge = _badges.any((b) =>
+    (b['target'] as int) > _lastSeenCount! && (b['target'] as int) <= count);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      setState(() {
+        _lastSeenCount = count;
+        if (crossedNewBadge) _showering = true;
+      });
+      if (crossedNewBadge) {
+        HapticFeedback.mediumImpact();
+        _showerController.forward(from: 0);
+        await Future.delayed(const Duration(milliseconds: 1800));
+        if (mounted) setState(() => _showering = false);
+      }
+    });
+  }
 
   // Add Donation bottom sheet
   void _showAddDonationSheet() {
@@ -61,11 +115,9 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(children: [
-              // Handle
               Container(margin: const EdgeInsets.only(top: 12),
                   width: 40, height: 4,
                   decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
-              // Header
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Row(children: [
@@ -88,7 +140,24 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                 padding: const EdgeInsets.all(20),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                  // Donation Type
+                  // Self-reported notice — sets expectations up front instead
+                  // of surprising the donor with an "unverified" tag later.
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber.shade200)),
+                    child: Row(children: [
+                      Icon(Icons.info_outline_rounded, size: 18, color: Colors.amber.shade700),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(
+                          "Manually logged donations are marked self-reported. Donations completed through an SOS request are auto-verified.",
+                          style: TextStyle(fontSize: 11.5, color: Colors.amber.shade900))),
+                    ]),
+                  ),
+                  const SizedBox(height: 18),
+
                   const Text('Donation Type *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 10),
                   Wrap(spacing: 10, runSpacing: 10,
@@ -110,7 +179,6 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
 
                   const SizedBox(height: 20),
 
-                  // Date picker
                   const Text('Donation Date *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 8),
                   GestureDetector(
@@ -149,7 +217,6 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
 
                   const SizedBox(height: 16),
 
-                  // Location
                   const Text('Hospital / Location *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 8),
                   TextField(
@@ -169,7 +236,6 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
 
                   const SizedBox(height: 16),
 
-                  // Units
                   const Text('Units Donated', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 10),
                   Row(children: [
@@ -191,7 +257,6 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
 
                   const SizedBox(height: 28),
 
-                  // Save button
                   SizedBox(
                     width: double.infinity, height: 52,
                     child: ElevatedButton(
@@ -216,6 +281,8 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                             'date_display': DateFormat('dd MMM yyyy').format(selectedDate!),
                             'location': locationCtrl.text.trim(),
                             'units': units,
+                            'source': 'manual',
+                            'verified': false,
                             'created_at': FieldValue.serverTimestamp(),
                           });
                           if (ctx.mounted) {
@@ -259,166 +326,153 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
     final color = widget.primaryColor;
 
     return SafeArea(
-      child: FadeTransition(
-        opacity: _fadeAnim,
-        child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('donors')
-              .doc(_uid)
-              .collection('donations')
-              .orderBy('date', descending: true)
-              .snapshots(),
-          builder: (context, snapshot) {
-            final donations = snapshot.data?.docs ?? [];
-            final totalDonations = donations.length;
-            final totalLives = totalDonations * 3;
-            final totalMl = totalDonations * 450;
+      child: Stack(children: [
+        FadeTransition(
+          opacity: _fadeAnim,
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('donors')
+                .doc(_uid)
+                .collection('donations')
+                .orderBy('date', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final donations = snapshot.data?.docs ?? [];
+              final totalDonations = donations.length;
+              final totalLives = totalDonations * 3;
+              final totalMl = totalDonations * 450;
 
-            return SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.all(20),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Badges (and the celebration shower) only count VERIFIED
+              // donations — self-reported entries are for the donor's own
+              // tracking, but shouldn't earn achievements. Someone could
+              // type in 10 fake entries otherwise and hit the 💎 badge
+              // without ever donating.
+              final verifiedCount = donations.where((doc) =>
+              (doc.data() as Map<String, dynamic>)['verified'] == true).length;
 
-                // Header row
-                // Header row
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Donation History',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1A1A2E),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Your journey of saving lives',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey.shade500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+              if (snapshot.connectionState != ConnectionState.waiting) {
+                _maybeCelebrate(verifiedCount);
+              }
 
-                    const SizedBox(width: 8),
+              return SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                    //Add Donation Button
-                    GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        _showAddDonationSheet();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: color,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(Icons.add, color: Colors.white, size: 16),
-                            SizedBox(width: 4),
-                            Text(
-                              'Log Donation',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                            const Text('Donation History',
+                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+                            const SizedBox(height: 4),
+                            Text('Your journey of saving lives',
+                                style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
                           ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () { HapticFeedback.lightImpact(); _showAddDonationSheet(); },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.add, color: Colors.white, size: 16),
+                            SizedBox(width: 4),
+                            Text('Log Donation', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                          ]),
+                        ),
+                      ),
+                    ],
+                  ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-                // Badges
-                _buildBadgesRow(color, totalDonations),
-                const SizedBox(height: 24),
+                  _buildBadgesRow(color, verifiedCount),
+                  const SizedBox(height: 24),
 
-                // Summary card
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)],
-                          begin: Alignment.topLeft, end: Alignment.bottomRight),
-                      borderRadius: BorderRadius.circular(20)),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                    _buildSummaryItem('$totalDonations', 'Total\nDonations'),
-                    Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
-                    _buildSummaryItem('$totalLives', 'Lives\nImpacted'),
-                    Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
-                    _buildSummaryItem('${totalMl}ml', 'Blood\nDonated'),
-                  ]),
-                ),
-
-                const SizedBox(height: 24),
-
-                const Text('History',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                const SizedBox(height: 12),
-
-                // History list — real time!
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  Center(child: CircularProgressIndicator(color: color))
-                else if (donations.isEmpty)
-                  Center(child: Padding(
-                    padding: const EdgeInsets.all(40),
-                    child: Column(children: [
-                      Icon(Icons.favorite_border_rounded, size: 60, color: Colors.grey.shade200),
-                      const SizedBox(height: 12),
-                      Text('No donations logged yet', style: TextStyle(color: Colors.grey.shade400, fontSize: 16, fontWeight: FontWeight.w500)),
-                      const SizedBox(height: 6),
-                      Text('Tap "Log Donation" to add your first!',
-                          style: TextStyle(color: Colors.grey.shade300, fontSize: 13)),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)],
+                            begin: Alignment.topLeft, end: Alignment.bottomRight),
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                      _buildSummaryItem('$totalDonations', 'Total\nDonations'),
+                      Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
+                      _buildSummaryItem('$totalLives', 'Lives\nImpacted'),
+                      Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
+                      _buildSummaryItem('${totalMl}ml', 'Blood\nDonated'),
                     ]),
-                  ))
-                else
-                  ...donations.asMap().entries.map((entry) {
-                    final i = entry.key;
-                    final data = entry.value.data() as Map<String, dynamic>;
-                    final docId = entry.value.id;
-                    return TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0, end: 1),
-                      duration: Duration(milliseconds: 300 + i * 80),
-                      builder: (context, val, child) => Opacity(
-                          opacity: val, child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child)),
-                      child: _buildDonationCard(data, docId, color),
-                    );
-                  }),
-              ]),
-            );
-          },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  const Text('History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 12),
+
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    Center(child: CircularProgressIndicator(color: color))
+                  else if (donations.isEmpty)
+                    Center(child: Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: Column(children: [
+                        Icon(Icons.favorite_border_rounded, size: 60, color: Colors.grey.shade200),
+                        const SizedBox(height: 12),
+                        Text('No donations logged yet', style: TextStyle(color: Colors.grey.shade400, fontSize: 16, fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 6),
+                        Text('Tap "Log Donation" to add your first!', style: TextStyle(color: Colors.grey.shade300, fontSize: 13)),
+                      ]),
+                    ))
+                  else
+                    ...donations.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final data = entry.value.data() as Map<String, dynamic>;
+                      final docId = entry.value.id;
+                      return TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: Duration(milliseconds: 300 + i * 80),
+                        builder: (context, val, child) => Opacity(
+                            opacity: val, child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child)),
+                        child: _buildDonationCard(data, docId, color),
+                      );
+                    }),
+                ]),
+              );
+            },
+          ),
         ),
-      ),
+
+        // Badge celebration shower — full-screen, tap-through overlay.
+        if (_showering)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _showerController,
+                builder: (context, _) => CustomPaint(
+                  painter: _ConfettiPainter(_showerController.value),
+                  size: Size.infinite,
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 
   Widget _buildBadgesRow(Color color, int totalDonations) {
-    final badges = [
-      {'icon': '🏅', 'label': '1st Donation', 'target': 1},
-      {'icon': '⭐', 'label': '3 Donations', 'target': 3},
-      {'icon': '🏆', 'label': '5 Donations', 'target': 5},
-      {'icon': '💎', 'label': '10 Donations', 'target': 10},
-    ];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Badges', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+      Row(children: [
+        const Text('Badges', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+        const SizedBox(width: 6),
+        Icon(Icons.verified_rounded, size: 13, color: color.withValues(alpha: 0.6)),
+      ]),
+      Text('Based on verified donations only', style: TextStyle(fontSize: 10.5, color: Colors.grey.shade400)),
       const SizedBox(height: 12),
-      Row(children: badges.map((b) {
+      Row(children: _badges.map((b) {
         final earned = totalDonations >= (b['target'] as int);
         return Expanded(child: TweenAnimationBuilder<double>(
           tween: Tween(begin: earned ? 0.5 : 1.0, end: 1.0),
@@ -454,6 +508,7 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
   }
 
   Widget _buildDonationCard(Map<String, dynamic> data, String docId, Color color) {
+    final isVerified = data['verified'] == true;
     return Dismissible(
       key: Key(docId),
       direction: DismissDirection.endToStart,
@@ -504,8 +559,25 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
               child: Icon(Icons.favorite_rounded, color: color, size: 22)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(data['type'] ?? 'Whole Blood',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
+            Row(children: [
+              Text(data['type'] ?? 'Whole Blood',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: isVerified ? Colors.green.shade50 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(isVerified ? Icons.verified_rounded : Icons.edit_note_rounded,
+                      size: 10, color: isVerified ? Colors.green.shade600 : Colors.grey.shade500),
+                  const SizedBox(width: 2),
+                  Text(isVerified ? 'Verified' : 'Self-reported',
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600,
+                          color: isVerified ? Colors.green.shade600 : Colors.grey.shade500)),
+                ]),
+              ),
+            ]),
             const SizedBox(height: 2),
             Text(data['location'] ?? '', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
             const SizedBox(height: 2),
@@ -521,4 +593,58 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
       ),
     );
   }
+}
+
+/// Lightweight confetti shower — no external package needed. Draws ~40
+/// falling particles (emoji-style colored circles + a few stars) whose
+/// vertical position, drift, and rotation are all pure functions of the
+/// animation value (0→1) and a per-particle seed, so it's fully
+/// deterministic and cheap to repaint every frame.
+class _ConfettiPainter extends CustomPainter {
+  final double progress;
+  _ConfettiPainter(this.progress);
+
+  static final List<Color> _colors = [
+    Colors.red.shade400, Colors.pink.shade300, Colors.amber.shade400,
+    Colors.purple.shade300, Colors.orange.shade400, Colors.teal.shade300,
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rnd = Random(7); // fixed seed → stable particle layout per shower
+    const particleCount = 40;
+
+    for (int i = 0; i < particleCount; i++) {
+      final seedX = rnd.nextDouble();
+      final delay = rnd.nextDouble() * 0.3; // stagger start times
+      final speed = 0.7 + rnd.nextDouble() * 0.6;
+      final drift = (rnd.nextDouble() - 0.5) * 60;
+      final colorIdx = rnd.nextInt(_colors.length);
+      final isStar = rnd.nextBool();
+      final particleSize = 5 + rnd.nextDouble() * 5;
+
+      final t = ((progress - delay) * speed).clamp(0.0, 1.0);
+      if (t <= 0) continue;
+
+      final dx = seedX * size.width + drift * t;
+      final dy = -20 + t * (size.height + 40);
+      final opacity = t > 0.75 ? (1 - t) * 4 : 1.0;
+      final rotation = t * 6.28 * (rnd.nextBool() ? 1 : -1);
+
+      final paint = Paint()..color = _colors[colorIdx].withValues(alpha: opacity.clamp(0.0, 1.0));
+
+      canvas.save();
+      canvas.translate(dx, dy);
+      canvas.rotate(rotation);
+      if (isStar) {
+        canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: particleSize, height: particleSize), paint);
+      } else {
+        canvas.drawCircle(Offset.zero, particleSize / 2, paint);
+      }
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) => oldDelegate.progress != progress;
 }

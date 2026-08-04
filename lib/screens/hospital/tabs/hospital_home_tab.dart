@@ -3,11 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/notification_bell.dart';
+import '../../../widgets/nearby_sos_section.dart';
 
 class HospitalHomeTab extends StatefulWidget {
   final Map<String, dynamic>? hospitalData;
   final Color primaryColor;
-  const HospitalHomeTab({super.key, required this.hospitalData, required this.primaryColor});
+  // Lets Quick Action buttons switch bottom-nav tabs without this widget
+  // needing to own the PageController itself. Passed down from
+  // HospitalDashboard; safe to omit (buttons just won't navigate).
+  final void Function(int tabIndex)? onNavigate;
+  const HospitalHomeTab({super.key, required this.hospitalData, required this.primaryColor, this.onNavigate});
   @override
   State<HospitalHomeTab> createState() => _HospitalHomeTabState();
 }
@@ -166,6 +171,27 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
 
           const SizedBox(height: 20),
 
+          // Nearby SOS — donor/recipient/other-hospital broadcasts within
+          // radius. View/Notify only (role != 'donor', so no accept
+          // capability). Own requests hidden here since they're already
+          // managed from the Requests tab above.
+          FadeTransition(opacity: _cardFade, child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('🚨 Nearby SOS Requests',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+              const SizedBox(height: 12),
+              NearbySosSection(
+                color: color,
+                role: 'hospital',
+                userData: widget.hospitalData,
+                showOwnRequests: false,
+              ),
+            ]),
+          )),
+
+          const SizedBox(height: 20),
+
           // Quick actions
           FadeTransition(opacity: _cardFade, child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -174,13 +200,13 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
               Row(children: [
-                _buildActionButton(Icons.add_circle_rounded, 'Post\nRequest', color, () {}),
+                _buildActionButton(Icons.add_circle_rounded, 'Post\nRequest', color, () => widget.onNavigate?.call(1)),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.search_rounded, 'Find\nDonors', Colors.purple, () {}),
+                _buildActionButton(Icons.search_rounded, 'Find\nDonors', Colors.purple, () => widget.onNavigate?.call(2)),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBanks', Colors.green, () {}),
+                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBanks', Colors.green, () => widget.onNavigate?.call(2)),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.history_rounded, 'Request\nHistory', Colors.orange, () {}),
+                _buildActionButton(Icons.history_rounded, 'Request\nHistory', Colors.orange, () => widget.onNavigate?.call(1)),
               ]),
             ]),
           )),
@@ -237,8 +263,18 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
 
   Future<void> _markFulfilled(String docId) async {
     HapticFeedback.mediumImpact();
-    await FirebaseFirestore.instance.collection('blood_requests').doc(docId)
-        .update({'status': 'fulfilled', 'fulfilled_at': FieldValue.serverTimestamp()});
+    final docRef = FirebaseFirestore.instance.collection('blood_requests').doc(docId);
+    final snap = await docRef.get();
+    final data = snap.data() as Map<String, dynamic>? ?? {};
+    await docRef.update({'status': 'fulfilled', 'fulfilled_at': FieldValue.serverTimestamp()});
+
+    // Same sync as the Requests tab's own Mark Fulfilled — keeps the
+    // donor-facing SOS mirror from staying "active" after this closes.
+    final linkedSosId = data['sos_request_id'];
+    if (linkedSosId != null) {
+      await FirebaseFirestore.instance.collection('sos_requests').doc(linkedSosId)
+          .update({'status': 'fulfilled'}).catchError((_) {});
+    }
   }
 
   Widget _buildEmptyState(String title, String subtitle) {

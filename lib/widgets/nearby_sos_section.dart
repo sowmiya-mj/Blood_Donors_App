@@ -39,6 +39,13 @@ class NearbySosSection extends StatefulWidget {
   // e.g. Recipient — so they still get full status on their own request
   // without seeing (or being shown as able to act on) anyone else's.
   final bool onlyMine;
+  // When false, this role's own posted SOS requests are excluded entirely
+  // from this widget (still shown in "others"-style nearby list only if
+  // they belong to someone else). Set false for roles that already have a
+  // dedicated screen for managing their own requests (e.g. Hospital's
+  // Requests tab) — avoids the same request being manageable from two
+  // different screens with two different action sets.
+  final bool showOwnRequests;
 
   const NearbySosSection({
     super.key,
@@ -47,6 +54,7 @@ class NearbySosSection extends StatefulWidget {
     required this.userData,
     this.radiusKm = 50,
     this.onlyMine = false,
+    this.showOwnRequests = true,
   });
 
   @override
@@ -455,14 +463,14 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         }
 
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (mine.isNotEmpty) ...[
+          if (widget.showOwnRequests && mine.isNotEmpty) ...[
             Text('Your Active SOS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700)),
             const SizedBox(height: 8),
             ...mine.map((item) => _buildSosCard(item, isMine: true, myUid: myUid, color: color)),
             if (others.isNotEmpty) const SizedBox(height: 16),
           ],
           if (others.isNotEmpty) ...[
-            if (mine.isNotEmpty)
+            if (widget.showOwnRequests && mine.isNotEmpty)
               Padding(padding: const EdgeInsets.only(bottom: 8),
                   child: Text('Nearby Requests You Can Help', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700))),
             ...others.map((item) => _buildSosCard(item, isMine: false, myUid: myUid, color: color)),

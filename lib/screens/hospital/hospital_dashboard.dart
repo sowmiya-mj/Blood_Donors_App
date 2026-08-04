@@ -76,7 +76,7 @@ class _HospitalDashboardState extends State<HospitalDashboard> with TickerProvid
         controller: _pageController,
         physics: const NeverScrollableScrollPhysics(),
         children: [
-          HospitalHomeTab(hospitalData: _hospitalData, primaryColor: _primaryColor),
+          HospitalHomeTab(hospitalData: _hospitalData, primaryColor: _primaryColor, onNavigate: _onTabTap),
           HospitalRequestsTab(hospitalData: _hospitalData, primaryColor: _primaryColor),
           HospitalSearchTab(hospitalData: _hospitalData, primaryColor: _primaryColor),
           HospitalProfileTab(hospitalData: _hospitalData, primaryColor: _primaryColor, onDataUpdated: _fetchHospitalData),

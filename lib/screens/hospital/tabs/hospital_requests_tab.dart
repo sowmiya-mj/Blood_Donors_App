@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../utils/geo_utils.dart';
 
 class HospitalRequestsTab extends StatefulWidget {
   final Map<String, dynamic>? hospitalData;
@@ -157,7 +158,22 @@ class _HospitalRequestsTabState extends State<HospitalRequestsTab>
                   const SizedBox(height: 16),
                   _buildSheetField(notesCtrl, 'Additional Notes (optional)', 'Any special requirements', Icons.notes_rounded, widget.primaryColor, maxLines: 2),
 
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                        color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.shade100)),
+                    child: Row(children: [
+                      Icon(Icons.campaign_outlined, size: 18, color: Colors.blue.shade700),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(
+                          'This will also broadcast as an SOS to nearby donors so they can respond directly.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.blue.shade900))),
+                    ]),
+                  ),
+
+                  const SizedBox(height: 24),
 
                   SizedBox(width: double.infinity, height: 52,
                     child: ElevatedButton(
@@ -172,33 +188,85 @@ class _HospitalRequestsTabState extends State<HospitalRequestsTab>
                         }
                         setSheet(() => isSaving = true);
                         try {
-                          await FirebaseFirestore.instance.collection('blood_requests').add({
+                          final city = widget.hospitalData?['city'] ?? '';
+                          final district = widget.hospitalData?['district'] ?? '';
+                          final state = widget.hospitalData?['state'] ?? '';
+
+                          // Geocode the hospital's registered location so
+                          // the mirrored SOS lands correctly on donors'
+                          // radius search — same approach used for SOS
+                          // created by Donor/Recipient/Blood Bank roles.
+                          final point = await GeoUtils.geocode('$city, $district, $state');
+
+                          final bloodReqRef = FirebaseFirestore.instance.collection('blood_requests').doc();
+                          final sosRef = FirebaseFirestore.instance.collection('sos_requests').doc();
+                          final batch = FirebaseFirestore.instance.batch();
+
+                          // Internal ledger — hospital's own request history/reporting.
+                          batch.set(bloodReqRef, {
                             'hospital_uid': _uid,
                             'hospital_name': widget.hospitalData?['hospital_name'] ?? '',
-                            'city': widget.hospitalData?['city'] ?? '',
-                            'district': widget.hospitalData?['district'] ?? '',
-                            'state': widget.hospitalData?['state'] ?? '',
+                            'city': city,
+                            'district': district,
+                            'state': state,
                             'blood_group': selectedBloodGroup,
                             'urgency': selectedUrgency,
                             'units': units,
                             'patient_name': patientCtrl.text.trim(),
                             'notes': notesCtrl.text.trim(),
                             'status': 'active',
+                            'sos_request_id': sosRef.id, // link so status changes stay in sync
                             'created_at': FieldValue.serverTimestamp(),
                           });
+
+                          // Donor-facing mirror — this is the doc
+                          // NearbySosSection actually queries. Same schema
+                          // as SOS created by other roles so the widget
+                          // needs zero special-casing for hospital-origin
+                          // requests.
+                          batch.set(sosRef, {
+                            'requester_uid': _uid,
+                            'requester_role': 'hospital',
+                            'patient_name': patientCtrl.text.trim(),
+                            'blood_group': selectedBloodGroup,
+                            'units': units,
+                            'units_fulfilled': 0,
+                            'hospital': widget.hospitalData?['hospital_name'] ?? '',
+                            'city': city,
+                            'district': district,
+                            'phone': widget.hospitalData?['phone'] ?? '',
+                            'status': 'active',
+                            if (point != null) 'lat': point.lat,
+                            if (point != null) 'lng': point.lng,
+                            'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
+                            'blood_request_id': bloodReqRef.id, // link back
+                            'created_at': FieldValue.serverTimestamp(),
+                          });
+
+                          await batch.commit();
+
                           if (ctx.mounted) {
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                                 content: const Row(children: [
                                   Icon(Icons.check_circle, color: Colors.white),
                                   SizedBox(width: 8),
-                                  Text('Blood request posted! 🩸'),
+                                  Text('Blood request posted & broadcast to donors! 🩸'),
                                 ]),
                                 backgroundColor: Colors.green.shade600,
                                 behavior: SnackBarBehavior.floating,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
                           }
-                        } catch (_) { setSheet(() => isSaving = false); }
+                        } catch (e) {
+                          setSheet(() => isSaving = false);
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Could not post request: $e'),
+                                backgroundColor: Colors.red.shade600,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
+                          }
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                           backgroundColor: widget.primaryColor, foregroundColor: Colors.white,
@@ -388,12 +456,25 @@ class _HospitalRequestsTabState extends State<HospitalRequestsTab>
 
   Future<void> _updateStatus(String docId, String status) async {
     HapticFeedback.mediumImpact();
-    await FirebaseFirestore.instance.collection('blood_requests').doc(docId)
-        .update({'status': status, 'updated_at': FieldValue.serverTimestamp()});
+    final docRef = FirebaseFirestore.instance.collection('blood_requests').doc(docId);
+    try {
+      final snap = await docRef.get();
+      final data = snap.data() as Map<String, dynamic>? ?? {};
+      await docRef.update({'status': status, 'updated_at': FieldValue.serverTimestamp()});
+
+      // Keep the donor-facing mirror in sync — otherwise a fulfilled or
+      // cancelled hospital request would keep showing as "active" to
+      // nearby donors indefinitely.
+      final linkedSosId = data['sos_request_id'];
+      if (linkedSosId != null) {
+        await FirebaseFirestore.instance.collection('sos_requests').doc(linkedSosId)
+            .update({'status': status == 'fulfilled' ? 'fulfilled' : 'expired'})
+            .catchError((_) {});
+      }
+    } catch (_) {}
   }
 }
 
 extension StringExtension on String {
   String capitalize() => isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
 }
-
