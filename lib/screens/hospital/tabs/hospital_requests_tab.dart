@@ -399,7 +399,7 @@ class _HospitalRequestsTabState extends State<HospitalRequestsTab>
   }
 
   Widget _buildRequestItem(Map<String, dynamic> d, String docId, Color color) {
-    final status = d['status'] ?? 'active';
+    final status = (d['status'] ?? 'active').toString();
     final urgency = d['urgency'] ?? 'Normal';
     final urgColor = urgency == 'Critical' ? Colors.red : urgency == 'Urgent' ? Colors.orange : Colors.green;
     final statusColor = status == 'active' ? Colors.blue : status == 'fulfilled' ? Colors.green : Colors.grey;

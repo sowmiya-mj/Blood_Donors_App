@@ -2,25 +2,57 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
 
 class DonorHomeTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
   final Color primaryColor;
-  const DonorHomeTab({super.key, required this.donorData, required this.primaryColor});
+  // Optional — lets the parent DonorDashboard jump to another tab when a
+  // Quick Action is tapped. If not supplied, those actions fall back to a
+  // "coming soon" style snackbar instead of doing nothing silently.
+  final VoidCallback? onNavigateToBloodBanks;
+  final VoidCallback? onNavigateToBadges;
+
+  const DonorHomeTab({
+    super.key,
+    required this.donorData,
+    required this.primaryColor,
+    this.onNavigateToBloodBanks,
+    this.onNavigateToBadges,
+  });
+
   @override
   State<DonorHomeTab> createState() => _DonorHomeTabState();
 }
 
-class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMixin {
+class _DonorHomeTabState extends State<DonorHomeTab>
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   bool _isAvailable = true;
   bool _togglingAvailability = false;
   late AnimationController _headerController, _statsController, _sosController, _cardController;
   late Animation<double> _headerFade, _statsFade, _sosPulse, _cardFade;
   late Animation<Offset> _headerSlide;
   int _displayDonations = 0, _displayLives = 0;
-  final int _totalDonations = 3, _totalLives = 9;
+
+  // Guards the count-up animation so it only plays once per screen visit,
+  // triggered by the first real Firestore snapshot rather than a fixed
+  // timer (the old hardcoded-number version didn't need this).
+  bool _statsAnimated = false;
+
+  // Minimum gap (days) before a donor is eligible again, by donation type.
+  // Whole Blood/Platelets/Plasma/Double Red Cells follow standard donation
+  // interval guidelines. Unknown/missing type falls back to Whole Blood's 90.
+  static const Map<String, int> _donationGapDays = {
+    'Whole Blood': 90,
+    'Platelets': 14,
+    'Plasma': 28,
+    'Double Red Cells': 112,
+  };
 
   @override
   void initState() {
@@ -37,20 +69,47 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
     _sosPulse = Tween<double>(begin: 1.0, end: 1.08).animate(CurvedAnimation(parent: _sosController, curve: Curves.easeInOut));
     _cardFade = CurvedAnimation(parent: _cardController, curve: Curves.easeOut);
     _headerController.forward();
-    Future.delayed(const Duration(milliseconds: 300), () { if (mounted) { _statsController.forward(); _startCountUp(); }});
     Future.delayed(const Duration(milliseconds: 500), () { if (mounted) _cardController.forward(); });
   }
 
-  void _startCountUp() {
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  void _maybeAnimateStats(int totalDonations, int totalLives) {
+    if (_statsAnimated) return;
+    _statsAnimated = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _statsController.forward();
+      _startCountUp(totalDonations, totalLives);
+    });
+  }
+
+  void _startCountUp(int totalDonations, int totalLives) {
     const steps = 30;
     for (int i = 0; i <= steps; i++) {
       Future.delayed(Duration(milliseconds: 50 * i), () {
         if (mounted) setState(() {
-          _displayDonations = (_totalDonations * i / steps).round();
-          _displayLives = (_totalLives * i / steps).round();
+          _displayDonations = (totalDonations * i / steps).round();
+          _displayLives = (totalLives * i / steps).round();
         });
       });
     }
+  }
+
+  // Latest donation (any source — this is a safety/eligibility check, not
+  // a rewards check, so self-reported entries count here even though they
+  // don't count toward badges) determines the next eligible date.
+  Map<String, dynamic> _computeEligibility(List<QueryDocumentSnapshot> donations) {
+    if (donations.isEmpty) return {'eligible': true, 'daysLeft': 0};
+    final latest = donations.first.data() as Map<String, dynamic>;
+    final dateStr = latest['date'] as String?;
+    final type = latest['type'] as String? ?? 'Whole Blood';
+    final lastDate = dateStr != null ? DateTime.tryParse(dateStr) : null;
+    if (lastDate == null) return {'eligible': true, 'daysLeft': 0};
+    final gap = _donationGapDays[type] ?? 90;
+    final eligibleDate = lastDate.add(Duration(days: gap));
+    final daysLeft = eligibleDate.difference(DateTime.now()).inDays;
+    return {'eligible': daysLeft <= 0, 'daysLeft': daysLeft > 0 ? daysLeft : 0};
   }
 
   @override
@@ -74,8 +133,28 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
 
   String _greeting() { final h = DateTime.now().hour; return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'; }
 
+  Future<void> _shareApp() async {
+    HapticFeedback.lightImpact();
+    await Share.share(
+      "I'm on BloodLink — a platform that connects blood donors with people who need it urgently. "
+          "Join me and help save lives with a single donation. 🩸",
+      subject: 'Save lives with BloodLink',
+    );
+  }
+
+  void _showComingSoon(String feature) {
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('$feature is coming soon!'),
+      backgroundColor: widget.primaryColor,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final name = widget.donorData?['name'] ?? 'Donor';
     final bloodGroup = widget.donorData?['blood_group'] ?? 'N/A';
     final city = widget.donorData?['city'] ?? '';
@@ -156,42 +235,85 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
             ),
           )),
           const SizedBox(height: 20),
-          // Stats
-          FadeTransition(opacity: _statsFade, child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(children: [
-              _buildStatCard('$_displayDonations', 'Donations', Icons.favorite, color),
-              const SizedBox(width: 12),
-              _buildStatCard('$_displayLives', 'Lives Helped', Icons.people_rounded, Colors.orange),
-              const SizedBox(width: 12),
-              _buildCompatibleCard(bloodGroup),
-            ]),
-          )),
-          const SizedBox(height: 20),
-          // Next donation card
-          FadeTransition(opacity: _cardFade, child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
-              child: Row(children: [
-                Container(width: 50, height: 50,
-                    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
-                    child: Icon(Icons.calendar_today_rounded, color: color, size: 24)),
-                const SizedBox(width: 14),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Next Eligible Donation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
-                  const SizedBox(height: 4),
-                  Text('You can donate again in 45 days', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                ])),
-                Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10)),
-                    child: Text('45 days', style: TextStyle(fontSize: 12, color: Colors.green.shade600, fontWeight: FontWeight.w600))),
-              ]),
-            ),
-          )),
+
+          // Stats + Next Eligible Donation — both driven live from the
+          // donor's donations subcollection (same source History tab reads).
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('donors')
+                .doc(_uid)
+                .collection('donations')
+                .orderBy('date', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final donations = snapshot.data?.docs ?? [];
+              final totalDonations = donations.length;
+              final totalLives = totalDonations * 3;
+
+              if (snapshot.connectionState != ConnectionState.waiting) {
+                _maybeAnimateStats(totalDonations, totalLives);
+              }
+
+              final eligibility = _computeEligibility(donations);
+              final bool isEligible = eligibility['eligible'] as bool;
+              final int daysLeft = eligibility['daysLeft'] as int;
+
+              return Column(children: [
+                FadeTransition(opacity: _statsFade, child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(children: [
+                    _buildStatCard('$_displayDonations', 'Donations', Icons.favorite, color),
+                    const SizedBox(width: 12),
+                    _buildStatCard('$_displayLives', 'Lives Helped', Icons.people_rounded, Colors.orange),
+                    const SizedBox(width: 12),
+                    _buildCompatibleCard(bloodGroup),
+                  ]),
+                )),
+                const SizedBox(height: 20),
+                // Next donation card
+                FadeTransition(opacity: _cardFade, child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+                    child: Row(children: [
+                      Container(width: 50, height: 50,
+                          decoration: BoxDecoration(
+                              color: (isEligible ? Colors.green : color).withValues(alpha: 0.1), shape: BoxShape.circle),
+                          child: Icon(
+                              isEligible ? Icons.check_circle_rounded : Icons.calendar_today_rounded,
+                              color: isEligible ? Colors.green : color, size: 24)),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('Next Eligible Donation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+                        const SizedBox(height: 4),
+                        Text(
+                          totalDonations == 0
+                              ? 'No donations logged yet — you\'re eligible now!'
+                              : isEligible
+                              ? 'You\'re eligible to donate now!'
+                              : 'You can donate again in $daysLeft day${daysLeft == 1 ? '' : 's'}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                        ),
+                      ])),
+                      Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                              color: isEligible ? Colors.green.shade50 : Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Text(
+                              isEligible ? 'Eligible' : '$daysLeft days',
+                              style: TextStyle(fontSize: 12,
+                                  color: isEligible ? Colors.green.shade600 : Colors.orange.shade700,
+                                  fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
+                )),
+              ]);
+            },
+          ),
+
           const SizedBox(height: 16),
           // SOS Nearby — radius-filtered (50km), shared across all roles
           FadeTransition(opacity: _cardFade, child: Padding(
@@ -211,13 +333,20 @@ class _DonorHomeTabState extends State<DonorHomeTab> with TickerProviderStateMix
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
               Row(children: [
-                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBank', Colors.blue, () {}),
+                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBank', Colors.blue,
+                        () => widget.onNavigateToBloodBanks != null
+                        ? widget.onNavigateToBloodBanks!()
+                        : _showComingSoon('Blood Bank finder')),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange, () {}),
+                _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange,
+                        () => _showComingSoon('Blood Camps')),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.workspace_premium_rounded, 'My\nBadges', Colors.purple, () {}),
+                _buildActionButton(Icons.workspace_premium_rounded, 'My\nBadges', Colors.purple,
+                        () => widget.onNavigateToBadges != null
+                        ? widget.onNavigateToBadges!()
+                        : _showComingSoon('Badges')),
                 const SizedBox(width: 12),
-                _buildActionButton(Icons.share_rounded, 'Share\nApp', Colors.green, () {}),
+                _buildActionButton(Icons.share_rounded, 'Share\nApp', Colors.green, _shareApp),
               ]),
             ]),
           )),

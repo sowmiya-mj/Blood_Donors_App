@@ -21,6 +21,11 @@ class _DonorDashboardState extends State<DonorDashboard> with TickerProviderStat
   late PageController _pageController;
   final Color _primaryColor = const Color(0xFFE53935);
 
+  // Which sub-mode the Search tab should open in (0=Donors, 1=Blood Banks,
+  // 2=Hospitals). Only relevant when navigated to from a Quick Action —
+  // otherwise the Search tab keeps whatever mode the donor last used.
+  int _searchInitialMode = 0;
+
   final List<_NavItem> _navItems = [
     _NavItem(icon: Icons.home_rounded, label: 'Home'),
     _NavItem(icon: Icons.search_rounded, label: 'Search'),
@@ -63,6 +68,14 @@ class _DonorDashboardState extends State<DonorDashboard> with TickerProviderStat
     _pageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
+  // Jumps to the Search tab pre-set to a given mode (used by the Home
+  // tab's "Blood Bank" Quick Action). Changing _searchInitialMode forces
+  // DonorSearchTab to rebuild fresh via its ValueKey below.
+  void _navigateToSearch(int mode) {
+    setState(() => _searchInitialMode = mode);
+    _onTabTap(1);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return Scaffold(backgroundColor: const Color(0xFFF8F9FA),
@@ -74,8 +87,18 @@ class _DonorDashboardState extends State<DonorDashboard> with TickerProviderStat
         controller: _pageController,
         physics: const NeverScrollableScrollPhysics(),
         children: [
-          DonorHomeTab(donorData: _donorData, primaryColor: _primaryColor),
-          DonorSearchTab(donorData: _donorData, primaryColor: _primaryColor),
+          DonorHomeTab(
+            donorData: _donorData,
+            primaryColor: _primaryColor,
+            onNavigateToBloodBanks: () => _navigateToSearch(1),
+            onNavigateToBadges: () => _onTabTap(2),
+          ),
+          DonorSearchTab(
+            key: ValueKey(_searchInitialMode),
+            donorData: _donorData,
+            primaryColor: _primaryColor,
+            initialMode: _searchInitialMode,
+          ),
           DonorHistoryTab(donorData: _donorData, primaryColor: _primaryColor),
           DonorProfileTab(donorData: _donorData, primaryColor: _primaryColor, onDataUpdated: _fetchDonorData),
         ],

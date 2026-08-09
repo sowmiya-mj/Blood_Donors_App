@@ -8,7 +8,13 @@ import '../../common/sos/sos_bottom_sheet.dart';
 class DonorSearchTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
   final Color primaryColor;
-  const DonorSearchTab({super.key, required this.donorData, required this.primaryColor});
+  final int initialMode; // 0=Donors, 1=Blood Banks, 2=Hospitals
+  const DonorSearchTab({
+    super.key,
+    required this.donorData,
+    required this.primaryColor,
+    this.initialMode = 0,
+  });
   @override
   State<DonorSearchTab> createState() => _DonorSearchTabState();
 }
@@ -17,8 +23,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     with SingleTickerProviderStateMixin {
 
   // Search mode: 0=Donors, 1=Blood Banks, 2=Hospitals
-  int _searchMode = 0;
-
+  late int _searchMode = widget.initialMode;
   String? _selectedBloodGroup;
   bool _isSearching = false;
   bool _sosActive = false;
