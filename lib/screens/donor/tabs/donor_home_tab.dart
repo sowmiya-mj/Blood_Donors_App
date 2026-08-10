@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
+import '../donor_hospitals_bloodbanks_map_screen.dart';
 
 class DonorHomeTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -32,8 +33,8 @@ class _DonorHomeTabState extends State<DonorHomeTab>
   @override
   bool get wantKeepAlive => true;
 
-  bool _isAvailable = true;
   bool _togglingAvailability = false;
+  bool _autoOffInFlight = false;
   late AnimationController _headerController, _statsController, _sosController, _cardController;
   late Animation<double> _headerFade, _statsFade, _sosPulse, _cardFade;
   late Animation<Offset> _headerSlide;
@@ -57,7 +58,6 @@ class _DonorHomeTabState extends State<DonorHomeTab>
   @override
   void initState() {
     super.initState();
-    _isAvailable = widget.donorData?['is_available'] ?? true;
     _headerController = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
     _statsController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _sosController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
@@ -112,6 +112,81 @@ class _DonorHomeTabState extends State<DonorHomeTab>
     return {'eligible': daysLeft <= 0, 'daysLeft': daysLeft > 0 ? daysLeft : 0};
   }
 
+  // "Available to Donate" is now linked to eligibility: when the donor
+// isn't eligible yet (recent donation, gap not passed), the toggle is
+// auto-forced off and locked — tapping it shows why instead of doing
+// nothing. Reads live from Firestore on both streams so it's always
+// correct even if state was set from another device or by Mark Done
+// on an SOS request.
+  Widget _buildAvailabilityToggle() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('donors').doc(_uid).collection('donations')
+          .orderBy('date', descending: true)
+          .snapshots(),
+      builder: (context, donSnap) {
+        final donations = donSnap.data?.docs ?? [];
+        final eligibility = _computeEligibility(donations);
+        final isEligible = eligibility['eligible'] as bool;
+        final daysLeft = eligibility['daysLeft'] as int;
+
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('donors').doc(_uid).snapshots(),
+          builder: (context, docSnap) {
+            final data = docSnap.data?.data() as Map<String, dynamic>?;
+            final isAvailable = data?['is_available'] ?? false;
+
+            if (!isEligible && isAvailable && !_autoOffInFlight) {
+              _autoOffInFlight = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) => _forceUnavailable());
+            }
+
+            final switchWidget = Switch(
+              value: isAvailable,
+              onChanged: isEligible ? _toggleAvailability : null,
+              activeColor: Colors.greenAccent,
+              activeTrackColor: Colors.white.withValues(alpha: 0.3),
+              inactiveThumbColor: Colors.white,
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.2),
+            );
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.25))),
+              child: Row(children: [
+                Icon(
+                  isEligible ? Icons.circle : Icons.lock_rounded,
+                  color: isAvailable ? Colors.greenAccent : Colors.white.withValues(alpha: 0.6),
+                  size: isEligible ? 10 : 16,
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(!isEligible ? 'Not Available' : (isAvailable ? 'Available to Donate' : 'Not Available'),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(
+                    !isEligible
+                        ? "Locked — eligible in $daysLeft day${daysLeft == 1 ? '' : 's'}"
+                        : (isAvailable ? 'You can receive donation requests' : 'Toggle on when ready'),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
+                  ),
+                ])),
+                _togglingAvailability
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : (isEligible
+                    ? switchWidget
+                    : GestureDetector(
+                    onTap: () => _showLockedSnack(daysLeft),
+                    child: Opacity(opacity: 0.5, child: IgnorePointer(child: switchWidget)))),
+              ]),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _headerController.dispose(); _statsController.dispose();
@@ -126,9 +201,28 @@ class _DonorHomeTabState extends State<DonorHomeTab>
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         await FirebaseFirestore.instance.collection('donors').doc(uid).update({'is_available': value});
-        setState(() => _isAvailable = value);
+
       }
     } catch (_) {} finally { setState(() => _togglingAvailability = false); }
+  }
+
+  Future<void> _forceUnavailable() async {
+    if (_uid.isEmpty) { _autoOffInFlight = false; return; }
+    try {
+      await FirebaseFirestore.instance.collection('donors').doc(_uid).update({'is_available': false});
+    } catch (_) {} finally { _autoOffInFlight = false; }
+  }
+
+  void _showLockedSnack(int daysLeft) {
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(daysLeft > 0
+          ? "You'll be eligible again in $daysLeft day${daysLeft == 1 ? '' : 's'} — availability unlocks automatically then."
+          : "Not eligible to donate yet."),
+      backgroundColor: Colors.orange.shade700,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
   }
 
   String _greeting() { final h = DateTime.now().hour; return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'; }
@@ -209,31 +303,12 @@ class _DonorHomeTabState extends State<DonorHomeTab>
                       child: Center(child: Text(bloodGroup, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)))),
                 ]),
                 const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.25))),
-                  child: Row(children: [
-                    Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle,
-                        color: _isAvailable ? Colors.greenAccent : Colors.white.withValues(alpha: 0.5))),
-                    const SizedBox(width: 10),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_isAvailable ? 'Available to Donate' : 'Not Available',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                      Text(_isAvailable ? 'You can receive donation requests' : 'Toggle on when ready',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12)),
-                    ])),
-                    _togglingAvailability
-                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Switch(value: _isAvailable, onChanged: _toggleAvailability,
-                        activeColor: Colors.greenAccent, activeTrackColor: Colors.white.withValues(alpha: 0.3),
-                        inactiveThumbColor: Colors.white, inactiveTrackColor: Colors.white.withValues(alpha: 0.2)),
-                  ]),
-                ),
+                _buildAvailabilityToggle(),
               ]),
             ),
           )),
+
+
           const SizedBox(height: 20),
 
           // Stats + Next Eligible Donation — both driven live from the
@@ -333,10 +408,9 @@ class _DonorHomeTabState extends State<DonorHomeTab>
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
               Row(children: [
-                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBank', Colors.blue,
-                        () => widget.onNavigateToBloodBanks != null
-                        ? widget.onNavigateToBloodBanks!()
-                        : _showComingSoon('Blood Bank finder')),
+                _buildActionButton(Icons.location_on_outlined, 'See\nMap', Colors.blue,
+                        () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => DonorHospitalsBloodBanksMapScreen(primaryColor: widget.primaryColor)))),
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange,
                         () => _showComingSoon('Blood Camps')),
