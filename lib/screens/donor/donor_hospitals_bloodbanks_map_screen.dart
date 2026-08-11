@@ -307,8 +307,9 @@ class _Facility {
   _Facility({required this.name, this.city, this.district, this.state, this.phone, required this.type});
 
   factory _Facility.fromDoc(Map<String, dynamic> data, _FacilityType type) {
+    final name = type == _FacilityType.hospital ? data['hospital_name'] : data['bank_name'];
     return _Facility(
-      name: data['name'] ?? (type == _FacilityType.hospital ? 'Hospital' : 'Blood Bank'),
+      name: name ?? (type == _FacilityType.hospital ? 'Hospital' : 'Blood Bank'),
       city: data['city'],
       district: data['district'],
       state: data['state'],
