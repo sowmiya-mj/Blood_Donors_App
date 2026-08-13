@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -125,7 +125,7 @@ class _DonorProfileTabState extends State<DonorProfileTab>
 
   // ── Profile photo ─────────────────────────────────────────────
   Future<void> _showPhotoOptions() async {
-    final hasPhoto = widget.donorData?['photo_url'] != null;
+    final hasPhoto = widget.donorData?['photo_path'] != null;
     final action = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
@@ -166,14 +166,18 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     HapticFeedback.mediumImpact();
     setState(() => _uploadingPhoto = true);
     try {
-      final ref = FirebaseStorage.instance.ref('donor_photos/$_uid.jpg');
-      await ref.putFile(File(file.path));
-      final url = await ref.getDownloadURL();
-      await FirebaseFirestore.instance.collection('donors').doc(_uid).update({'photo_url': url});
+      // Copy into the app's own permanent documents folder — the path
+      // image_picker returns points at a temp/cache location that isn't
+      // guaranteed to survive OS storage cleanup.
+      final docsDir = await getApplicationDocumentsDirectory();
+      final savedPath = '${docsDir.path}/donor_photo_$_uid.jpg';
+      await File(file.path).copy(savedPath);
+
+      await FirebaseFirestore.instance.collection('donors').doc(_uid).update({'photo_path': savedPath});
       widget.onDataUpdated();
       _showSnack('Profile photo updated!');
     } catch (_) {
-      _showSnack('Could not upload photo. Try again.', isError: true);
+      _showSnack('Could not save photo. Try again.', isError: true);
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -184,8 +188,12 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     HapticFeedback.mediumImpact();
     setState(() => _uploadingPhoto = true);
     try {
-      try { await FirebaseStorage.instance.ref('donor_photos/$_uid.jpg').delete(); } catch (_) {}
-      await FirebaseFirestore.instance.collection('donors').doc(_uid).update({'photo_url': FieldValue.delete()});
+      final path = widget.donorData?['photo_path'] as String?;
+      if (path != null) {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      }
+      await FirebaseFirestore.instance.collection('donors').doc(_uid).update({'photo_path': FieldValue.delete()});
       widget.onDataUpdated();
       _showSnack('Profile photo removed');
     } catch (_) {
@@ -316,8 +324,8 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     final city = data?['city'] ?? '';
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
-    final photoUrl = data?['photo_url'] as String?;
-
+    final photoPath = data?['photo_path'] as String?;
+    final hasLocalPhoto = photoPath != null && File(photoPath).existsSync();
     return SafeArea(
       child: FadeTransition(
         opacity: _fadeAnim,
@@ -363,13 +371,13 @@ class _DonorProfileTabState extends State<DonorProfileTab>
                               color: Colors.white.withValues(alpha: 0.2),
                               border: Border.all(
                                   color: Colors.white.withValues(alpha: 0.5), width: 3),
-                              image: photoUrl != null
-                                  ? DecorationImage(image: NetworkImage(photoUrl), fit: BoxFit.cover)
+                              image: hasLocalPhoto
+                                  ? DecorationImage(image: FileImage(File(photoPath!)), fit: BoxFit.cover)
                                   : null,
                             ),
                             child: _uploadingPhoto
                                 ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                : (photoUrl == null
+                                : (!hasLocalPhoto
                                 ? Center(
                               child: Text(
                                 name.isNotEmpty ? name[0].toUpperCase() : 'D',
