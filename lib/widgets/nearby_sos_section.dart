@@ -174,6 +174,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
 
     final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
     final acceptanceRef = docRef.collection('acceptances').doc(uid);
+    final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(uid);
     final myName = widget.userData?['name'] ?? 'A donor';
     final myPhone = widget.userData?['phone'] ?? '';
     final myBloodGroup = widget.userData?['blood_group'] ?? '';
@@ -189,6 +190,18 @@ class _NearbySosSectionState extends State<NearbySosSection> {
 
         final alreadyMine = await tx.get(acceptanceRef);
         if (alreadyMine.exists) throw 'already';
+
+        // A donor can only have ONE active (pending or accepted) offer out
+        // at a time, across ALL SOS requests — tracked via a pointer field
+        // on their own donor doc. This blocks "I'll Help" on every other
+        // request until this offer is withdrawn or declined.
+        final donorSnap = await tx.get(donorDocRef);
+        String? currentActiveId;
+        if (donorSnap.exists) {
+          final donorData = donorSnap.data();
+          currentActiveId = donorData?['active_offer_request_id'] as String?;
+        }
+        if (currentActiveId != null && currentActiveId != requestId) throw 'busy';
 
         // Full check is still based on ACCEPTED slots only (units_fulfilled
         // only ever counts accepted offers now) — a request can keep
@@ -209,6 +222,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
           'accepted_at': null,
           'donation_doc_id': null,
         });
+        tx.update(donorDocRef, {'active_offer_request_id': requestId});
       }).timeout(const Duration(seconds: 10));
 
       // Best-effort notification — matches the notifications/{uid}/items schema.
@@ -242,6 +256,8 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         String msg;
         if (e.toString().contains('already')) {
           msg = "You've already offered to help this request";
+        } else if (e.toString().contains('busy')) {
+          msg = "You're already helping with another request. Withdraw that offer first.";
         } else if (e.toString().contains('full')) {
           msg = 'All units for this request are already covered';
         } else if (e is TimeoutException) {
@@ -277,6 +293,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
     final offerRef = docRef.collection('acceptances').doc(donorUid);
     final donationRef = FirebaseFirestore.instance.collection('donors').doc(donorUid).collection('donations').doc();
+    final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(donorUid);
 
     try {
       Map<String, dynamic>? offerData;
@@ -308,6 +325,12 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         tx.update(docRef, {
           'units_fulfilled': newFulfilled,
         });
+        // Release the donor's "pending offer" lock now that they're
+        // confirmed — from here on, the donation record below flips
+        // is_available off automatically (via the eligibility system in
+        // donor_home_tab.dart), which is what actually stops them helping
+        // anyone else for the ~90 day gap. No need to keep this pointer set.
+        tx.update(donorDocRef, {'active_offer_request_id': null});
         tx.set(donationRef, {
           'type': 'Whole Blood',
           'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
@@ -389,8 +412,24 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     if (confirm != true) return;
 
     try {
-      await FirebaseFirestore.instance.collection('sos_requests').doc(requestId)
-          .collection('acceptances').doc(donorUid).delete();
+      final offerRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId)
+          .collection('acceptances').doc(donorUid);
+      final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(donorUid);
+
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final donorSnap = await tx.get(donorDocRef);
+        String? currentActiveId;
+        if (donorSnap.exists) {
+          final donorData = donorSnap.data();
+          currentActiveId = donorData?['active_offer_request_id'] as String?;
+        }
+        tx.delete(offerRef);
+        // Only clear if it's still pointing at THIS request — guards against
+        // wiping out a newer lock the donor may have taken in the meantime.
+        if (currentActiveId == requestId) {
+          tx.update(donorDocRef, {'active_offer_request_id': null});
+        }
+      });
 
       FirebaseFirestore.instance.collection('notifications').doc(donorUid).collection('items').add({
         'type': 'sos_declined',
@@ -479,12 +518,17 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     if (uid == null) return;
     final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
     final acceptanceRef = docRef.collection('acceptances').doc(uid);
+    final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(uid);
 
     try {
       if (!wasAccepted) {
         // Still pending — nothing else was ever touched, so a plain delete
-        // fully undoes the offer.
-        await acceptanceRef.delete();
+        // fully undoes the offer. Also frees up the donor to offer help
+        // elsewhere again.
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          tx.delete(acceptanceRef);
+          tx.update(donorDocRef, {'active_offer_request_id': null});
+        });
         return;
       }
 
@@ -508,6 +552,9 @@ class _NearbySosSectionState extends State<NearbySosSection> {
           'units_fulfilled': newFulfilled,
           'status': 'active', // always reopens — a cancellation means a slot is free again
         });
+        // Defensive — normally already cleared when the offer was accepted,
+        // but doesn't hurt to make sure the donor isn't left locked out.
+        tx.update(donorDocRef, {'active_offer_request_id': null});
         if (donationDocId != null) {
           tx.delete(FirebaseFirestore.instance.collection('donors').doc(uid).collection('donations').doc(donationDocId));
         }
@@ -614,61 +661,75 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     if (_locating) return _statusBox(color, 'Finding your location…', loading: true);
     if (_viewerPoint == null) return _statusBox(color, 'Set your city in profile to see nearby SOS requests');
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('sos_requests')
-          .where('status', isEqualTo: 'active').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _statusBox(color, 'Could not load SOS requests.\n${snapshot.error}', isError: true);
-        }
-        if (!snapshot.hasData) return _statusBox(color, 'Loading nearby SOS…', loading: true);
+    // Donor's own "busy elsewhere" lock — read live so it reacts instantly
+    // to accept/withdraw/decline anywhere else in the app, no refresh needed.
+    final lockStream = (widget.role == 'donor' && myUid != null)
+        ? FirebaseFirestore.instance.collection('donors').doc(myUid).snapshots()
+        : const Stream<DocumentSnapshot>.empty();
 
-        final now = DateTime.now();
-        final items = <_SosItem>[];
+    return StreamBuilder<DocumentSnapshot>(
+      stream: lockStream,
+      builder: (context, lockSnap) {
+        final lockData = lockSnap.data?.data() as Map<String, dynamic>?;
+        final myActiveOfferRequestId = lockData?['active_offer_request_id'] as String?;
 
-        for (final doc in snapshot.data!.docs) {
-          final d = doc.data() as Map<String, dynamic>;
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('sos_requests')
+              .where('status', isEqualTo: 'active').snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return _statusBox(color, 'Could not load SOS requests.\n${snapshot.error}', isError: true);
+            }
+            if (!snapshot.hasData) return _statusBox(color, 'Loading nearby SOS…', loading: true);
 
-          // Opportunistic auto-expire — no Cloud Functions on Spark plan,
-          // so whichever client happens to load this first past its expiry
-          // flips it to 'expired'. Fire-and-forget; failure just means the
-          // next viewer's client tries again.
-          final expiresAt = (d['expiresAt'] as Timestamp?)?.toDate();
-          if (expiresAt != null && expiresAt.isBefore(now)) {
-            doc.reference.update({'status': 'expired'}).catchError((_) {});
-            continue;
-          }
+            final now = DateTime.now();
+            final items = <_SosItem>[];
 
-          final lat = d['lat'];
-          final lng = d['lng'];
-          if (lat is! num || lng is! num) continue; // pre-fix requests without coords — can't place on radius
-          final distance = GeoUtils.distanceKm(_viewerPoint!.lat, _viewerPoint!.lng, lat.toDouble(), lng.toDouble());
-          if (distance <= widget.radiusKm) items.add(_SosItem(doc.id, d, distance));
-        }
+            for (final doc in snapshot.data!.docs) {
+              final d = doc.data() as Map<String, dynamic>;
 
-        items.sort((a, b) => a.distance.compareTo(b.distance));
+              // Opportunistic auto-expire — no Cloud Functions on Spark plan,
+              // so whichever client happens to load this first past its expiry
+              // flips it to 'expired'. Fire-and-forget; failure just means the
+              // next viewer's client tries again.
+              final expiresAt = (d['expiresAt'] as Timestamp?)?.toDate();
+              if (expiresAt != null && expiresAt.isBefore(now)) {
+                doc.reference.update({'status': 'expired'}).catchError((_) {});
+                continue;
+              }
 
-        final mine = items.where((i) => i.data['requester_uid'] == myUid).toList();
-        final others = items.where((i) => i.data['requester_uid'] != myUid).toList();
+              final lat = d['lat'];
+              final lng = d['lng'];
+              if (lat is! num || lng is! num) continue; // pre-fix requests without coords — can't place on radius
+              final distance = GeoUtils.distanceKm(_viewerPoint!.lat, _viewerPoint!.lng, lat.toDouble(), lng.toDouble());
+              if (distance <= widget.radiusKm) items.add(_SosItem(doc.id, d, distance));
+            }
 
-        if (items.isEmpty) {
-          return _statusBox(color, 'No active SOS requests within ${widget.radiusKm.toInt()} km 🎉');
-        }
+            items.sort((a, b) => a.distance.compareTo(b.distance));
 
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (widget.showOwnRequests && mine.isNotEmpty) ...[
-            Text('Your Active SOS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700)),
-            const SizedBox(height: 8),
-            ...mine.map((item) => _buildSosCard(item, isMine: true, myUid: myUid, color: color)),
-            if (others.isNotEmpty) const SizedBox(height: 16),
-          ],
-          if (others.isNotEmpty) ...[
-            if (widget.showOwnRequests && mine.isNotEmpty)
-              Padding(padding: const EdgeInsets.only(bottom: 8),
-                  child: Text('Nearby Requests You Can Help', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700))),
-            ...others.map((item) => _buildSosCard(item, isMine: false, myUid: myUid, color: color)),
-          ],
-        ]);
+            final mine = items.where((i) => i.data['requester_uid'] == myUid).toList();
+            final others = items.where((i) => i.data['requester_uid'] != myUid).toList();
+
+            if (items.isEmpty) {
+              return _statusBox(color, 'No active SOS requests within ${widget.radiusKm.toInt()} km 🎉');
+            }
+
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (widget.showOwnRequests && mine.isNotEmpty) ...[
+                Text('Your Active SOS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700)),
+                const SizedBox(height: 8),
+                ...mine.map((item) => _buildSosCard(item, isMine: true, myUid: myUid, color: color, myActiveOfferRequestId: myActiveOfferRequestId)),
+                if (others.isNotEmpty) const SizedBox(height: 16),
+              ],
+              if (others.isNotEmpty) ...[
+                if (widget.showOwnRequests && mine.isNotEmpty)
+                  Padding(padding: const EdgeInsets.only(bottom: 8),
+                      child: Text('Nearby Requests You Can Help', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey.shade700))),
+                ...others.map((item) => _buildSosCard(item, isMine: false, myUid: myUid, color: color, myActiveOfferRequestId: myActiveOfferRequestId)),
+              ],
+            ]);
+          },
+        );
       },
     );
   }
@@ -710,7 +771,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
   /// Wraps the card in a StreamBuilder on the acceptances subcollection so
   /// it always reflects the live donor list / fulfilled count, without the
   /// parent card widget needing to know about it.
-  Widget _buildSosCard(_SosItem item, {required bool isMine, required String? myUid, required Color color}) {
+  Widget _buildSosCard(_SosItem item, {required bool isMine, required String? myUid, required Color color, String? myActiveOfferRequestId}) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('sos_requests')
@@ -741,6 +802,11 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         final iAmHelping = iAmAccepted || iAmPending; // any state where I've already acted
         final isAvailable = widget.userData?['is_available'] == true;
         final isAccepting = _accepting.contains(item.id);
+        // True when this donor already has a pending/accepted offer on a
+        // DIFFERENT request — locks out "I'll Help" here until they
+        // withdraw or get declined on that other one.
+        final lockedElsewhere = !isMine && widget.role == 'donor'
+            && myActiveOfferRequestId != null && myActiveOfferRequestId != item.id && !iAmHelping;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
@@ -827,6 +893,23 @@ class _NearbySosSectionState extends State<NearbySosSection> {
                     : !isAvailable
                     ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text('Not available', style: TextStyle(color: Colors.grey.shade400, fontSize: 9, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  OutlinedButton(
+                    onPressed: () => _showDetailsSheet(item.data, item.distance),
+                    style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    child: const Text('Notify', style: TextStyle(fontSize: 12)),
+                  ),
+                ])
+                // Already helping with a DIFFERENT request (a pending offer
+                // or an accepted one) — can't split themselves between two
+                // patients, so "I'll Help" is hidden here until they
+                // withdraw/get declined on the other request.
+                    : lockedElsewhere
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('Helping elsewhere', style: TextStyle(color: Colors.grey.shade400, fontSize: 9, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 4),
                   OutlinedButton(
                     onPressed: () => _showDetailsSheet(item.data, item.distance),
