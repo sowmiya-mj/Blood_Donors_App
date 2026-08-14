@@ -12,6 +12,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../donor_edit_profile_screen.dart';
+import '../../auth/role_selection_screen.dart';
 
 class DonorProfileTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -240,7 +241,13 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     );
     if (confirm == true) {
       await FirebaseAuth.instance.signOut();
-      // TODO: Navigate to role selection
+      if (!mounted) return;
+      // Clear the entire navigation stack so Back never returns to the
+      // dashboard after logout, and land on role selection.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+            (route) => false,
+      );
     }
   }
 
@@ -255,6 +262,17 @@ class _DonorProfileTabState extends State<DonorProfileTab>
       final issueDate = DateFormat('d MMMM yyyy').format(DateTime.now());
       final livesHelped = verifiedCount * 3;
 
+      // Logo is bundled as an app asset (see pubspec.yaml note). If it's
+      // ever missing for some reason, the certificate still renders fine
+      // without it rather than crashing the whole download.
+      pw.MemoryImage? logo;
+      try {
+        final logoBytes = await rootBundle.load('assets/images/bloodlink_logo.png');
+        logo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+      } catch (_) {
+        logo = null;
+      }
+
       doc.addPage(pw.Page(
         pageFormat: PdfPageFormat.a4,
         build: (context) => pw.Container(
@@ -265,6 +283,10 @@ class _DonorProfileTabState extends State<DonorProfileTab>
               mainAxisAlignment: pw.MainAxisAlignment.center,
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
+                if (logo != null) ...[
+                  pw.Image(logo, width: 70, height: 70),
+                  pw.SizedBox(height: 10),
+                ],
                 pw.Text('BloodLink', style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold, color: PdfColors.red700)),
                 pw.Text("Your Blood. Someone's Tomorrow.", style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
                 pw.SizedBox(height: 30),
@@ -284,8 +306,13 @@ class _DonorProfileTabState extends State<DonorProfileTab>
                 ),
                 pw.SizedBox(height: 40),
                 pw.Text('Issued on $issueDate', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
-                pw.SizedBox(height: 20),
-                pw.Text('— BloodLink Team', style: pw.TextStyle(fontSize: 12, fontStyle: pw.FontStyle.italic)),
+                pw.SizedBox(height: 24),
+                // Signature-line style sign-off, replacing the old em-dash
+                // ("—") which the default PDF font can't render — it was
+                // showing up as a tofu box (□) instead of a dash.
+                pw.Container(width: 130, height: 1, color: PdfColors.grey400),
+                pw.SizedBox(height: 6),
+                pw.Text('BloodLink Team', style: pw.TextStyle(fontSize: 12, fontStyle: pw.FontStyle.italic, color: PdfColors.grey700)),
               ],
             ),
           ),

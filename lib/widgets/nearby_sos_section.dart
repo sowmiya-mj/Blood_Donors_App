@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:intl/intl.dart';
 import '../utils/geo_utils.dart';
 import '../utils/blood_compatibility.dart';
 
@@ -118,6 +119,22 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     }
   }
 
+  Future<void> _messageDonor(String phone) async {
+    if (phone.isEmpty) return;
+    HapticFeedback.lightImpact();
+    final uri = Uri(scheme: 'sms', path: phone);
+    try {
+      await launchUrl(uri);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not open Messages for $phone'),
+          backgroundColor: Colors.red.shade600,
+        ));
+      }
+    }
+  }
+
   void _shareSos(Map<String, dynamic> d) {
     HapticFeedback.lightImpact();
     final text = '🩸 Blood needed urgently!\n'
@@ -136,15 +153,16 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     return int.tryParse('$v') ?? fallback;
   }
 
-  /// Accept flow — now writes to the acceptances subcollection instead of
-  /// a single accepted_by field, so multiple donors can help one request.
-  /// Transaction guarantees: re-reads units_fulfilled fresh, checks this
-  /// donor hasn't already accepted, checks there's still a slot open, then
-  /// creates the acceptance doc + bumps units_fulfilled (+ flips status to
-  /// 'fulfilled' if that was the last slot) — all atomically. Two donors
-  /// tapping "Help" on the last open slot at the same instant can't both
-  /// succeed; whichever transaction commits first wins, the other retries
-  /// and sees the slot is gone.
+  /// Offer flow (Stage 1 of 2) — donor taps "I'll Help" and this creates a
+  /// PENDING offer doc in the acceptances subcollection. It does NOT touch
+  /// units_fulfilled and does NOT flip the request to 'fulfilled' — that
+  /// only happens once the requester explicitly Accepts this donor (see
+  /// _acceptDonorOffer below). This lets the requester review the donor's
+  /// profile / call / message them before committing a slot to them.
+  ///
+  /// A snapshot of the donor's profile (name, phone, blood group, age,
+  /// city/district) is stored directly on the offer doc so the requester's
+  /// review UI doesn't need an extra Firestore read per offer.
   Future<void> _helpSos(String requestId, Map<String, dynamic> requestData) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -155,6 +173,10 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     final acceptanceRef = docRef.collection('acceptances').doc(uid);
     final myName = widget.userData?['name'] ?? 'A donor';
     final myPhone = widget.userData?['phone'] ?? '';
+    final myBloodGroup = widget.userData?['blood_group'] ?? '';
+    final myAge = widget.userData?['age'];
+    final myCity = widget.userData?['city'] ?? '';
+    final myDistrict = widget.userData?['district'] ?? '';
 
     try {
       await FirebaseFirestore.instance.runTransaction((tx) async {
@@ -165,19 +187,24 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         final alreadyMine = await tx.get(acceptanceRef);
         if (alreadyMine.exists) throw 'already';
 
+        // Full check is still based on ACCEPTED slots only (units_fulfilled
+        // only ever counts accepted offers now) — a request can keep
+        // receiving offers to review even while other offers are pending.
         final unitsNeeded = _asInt(data['units']);
         final unitsFulfilled = _asInt(data['units_fulfilled'], fallback: 0);
         if (unitsFulfilled >= unitsNeeded) throw 'full';
 
-        final newFulfilled = unitsFulfilled + 1;
         tx.set(acceptanceRef, {
           'donor_name': myName,
           'donor_phone': myPhone,
-          'accepted_at': FieldValue.serverTimestamp(),
-        });
-        tx.update(docRef, {
-          'units_fulfilled': newFulfilled,
-          if (newFulfilled >= unitsNeeded) 'status': 'fulfilled',
+          'donor_blood_group': myBloodGroup,
+          'donor_age': myAge,
+          'donor_city': myCity,
+          'donor_district': myDistrict,
+          'status': 'pending',
+          'offered_at': FieldValue.serverTimestamp(),
+          'accepted_at': null,
+          'donation_doc_id': null,
         });
       }).timeout(const Duration(seconds: 10));
 
@@ -189,9 +216,9 @@ class _NearbySosSectionState extends State<NearbySosSection> {
             .doc(requesterUid)
             .collection('items')
             .add({
-          'type': 'sos_accepted',
-          'title': 'Someone is helping! 🩸',
-          'message': '$myName accepted your SOS request for ${requestData['blood_group'] ?? ''}.',
+          'type': 'sos_offer',
+          'title': 'A donor wants to help! 🙋',
+          'body': '$myName offered to help your ${requestData['blood_group'] ?? ''} request. Review their profile to confirm.',
           'read': false,
           'createdAt': FieldValue.serverTimestamp(),
         }).catchError((_) {});
@@ -199,7 +226,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text("You're helping! The requester has been notified."),
+          content: const Text("Offer sent! The requester will review and confirm."),
           backgroundColor: Colors.green.shade600,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -207,11 +234,11 @@ class _NearbySosSectionState extends State<NearbySosSection> {
       }
     } catch (e) {
       // ignore: avoid_print
-      print('SOS accept error: $e');
+      print('SOS offer error: $e');
       if (mounted) {
         String msg;
         if (e.toString().contains('already')) {
-          msg = "You've already accepted this request";
+          msg = "You've already offered to help this request";
         } else if (e.toString().contains('full')) {
           msg = 'All units for this request are already covered';
         } else if (e is TimeoutException) {
@@ -219,7 +246,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
         } else if (e.toString().contains('permission-denied')) {
           msg = 'Permission denied — check Firestore rules for acceptances';
         } else {
-          msg = 'Could not accept: $e';
+          msg = 'Could not send offer: $e';
         }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(msg),
@@ -231,6 +258,140 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     } finally {
       if (mounted) setState(() => _accepting.remove(requestId));
     }
+  }
+
+  /// Accept flow (Stage 2 of 2) — the REQUESTER calls this after reviewing a
+  /// pending offer. Atomically: re-checks a slot is still open, flips the
+  /// offer to 'accepted', bumps units_fulfilled (+ flips the request to
+  /// 'fulfilled' if that was the last slot). After the transaction commits,
+  /// also (a) writes a verified donation record for the donor so their
+  /// History tab / badges update automatically, and (b) notifies the donor.
+  Future<void> _acceptDonorOffer(String requestId, String donorUid, Map<String, dynamic> requestData) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _accepting.add('$requestId-$donorUid'));
+
+    final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(requestId);
+    final offerRef = docRef.collection('acceptances').doc(donorUid);
+    final donationRef = FirebaseFirestore.instance.collection('donors').doc(donorUid).collection('donations').doc();
+
+    try {
+      Map<String, dynamic>? offerData;
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) throw 'gone';
+        final data = snap.data() as Map<String, dynamic>;
+
+        final offerSnap = await tx.get(offerRef);
+        if (!offerSnap.exists) throw 'gone';
+        offerData = offerSnap.data() as Map<String, dynamic>;
+        if (offerData!['status'] == 'accepted') throw 'already';
+
+        final unitsNeeded = _asInt(data['units']);
+        final unitsFulfilled = _asInt(data['units_fulfilled'], fallback: 0);
+        if (unitsFulfilled >= unitsNeeded) throw 'full';
+
+        final newFulfilled = unitsFulfilled + 1;
+        tx.update(offerRef, {
+          'status': 'accepted',
+          'accepted_at': FieldValue.serverTimestamp(),
+          'donation_doc_id': donationRef.id,
+        });
+        tx.update(docRef, {
+          'units_fulfilled': newFulfilled,
+          if (newFulfilled >= unitsNeeded) 'status': 'fulfilled',
+        });
+        tx.set(donationRef, {
+          'type': 'Whole Blood',
+          'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'date_display': DateFormat('dd MMM yyyy').format(DateTime.now()),
+          'location': '${requestData['hospital'] ?? requestData['city'] ?? ''}'
+              '${(requestData['district'] ?? '').toString().isNotEmpty ? ', ${requestData['district']}' : ''}',
+          'units': 1,
+          'source': 'sos',
+          'verified': true,
+          'request_id': requestId,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }).timeout(const Duration(seconds: 10));
+
+      final donorName = offerData?['donor_name'] ?? 'The donor';
+      FirebaseFirestore.instance.collection('notifications').doc(donorUid).collection('items').add({
+        'type': 'sos_help_accepted',
+        'title': 'Your help is accepted! 🎉',
+        'body': 'Thank you! Your donation for the ${requestData['blood_group'] ?? ''} request has been confirmed.',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$donorName confirmed! They have been notified.'),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        String msg;
+        if (e.toString().contains('already')) {
+          msg = 'This offer is already confirmed';
+        } else if (e.toString().contains('full')) {
+          msg = 'All units for this request are already covered';
+        } else if (e is TimeoutException) {
+          msg = 'Timed out — check Firestore rules allow this update';
+        } else {
+          msg = 'Could not confirm this donor: $e';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _accepting.remove('$requestId-$donorUid'));
+    }
+  }
+
+  /// Decline flow — REQUESTER rejects a pending offer without accepting it.
+  /// Only valid while the offer is still 'pending' (an already-accepted
+  /// donor is removed via the donor's own Cancel action instead, since by
+  /// then they've committed a slot). Just deletes the offer doc and lets
+  /// the donor know, so they can look elsewhere.
+  Future<void> _declineDonorOffer(String requestId, String donorUid, Map<String, dynamic> offerData, Map<String, dynamic> requestData) async {
+    HapticFeedback.lightImpact();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Decline this offer?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('${offerData['donor_name'] ?? 'This donor'} will be notified so they can help someone else.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Cancel', style: TextStyle(color: Colors.grey.shade600))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              child: const Text('Decline')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('sos_requests').doc(requestId)
+          .collection('acceptances').doc(donorUid).delete();
+
+      FirebaseFirestore.instance.collection('notifications').doc(donorUid).collection('items').add({
+        'type': 'sos_declined',
+        'title': 'Offer declined',
+        'body': 'Your offer to help the ${requestData['blood_group'] ?? ''} request wasn\'t needed this time. Thanks for stepping up!',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
+    } catch (_) {}
   }
 
   void _showHelpConfirmation(String requestId, Map<String, dynamic> d) {
@@ -274,24 +435,33 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     );
   }
 
-  /// Cancel flow — removes THIS donor's acceptance doc only (other donors
-  /// on the same request are untouched), decrements units_fulfilled, and
-  /// reopens the request to 'active' if it had been marked 'fulfilled'.
-  Future<void> _cancelHelp(String requestId) async {
+  /// Cancel flow (donor-initiated) — removes THIS donor's offer/acceptance
+  /// doc only (other donors on the same request are untouched). Behavior
+  /// branches on whether the offer had been confirmed yet:
+  /// - still 'pending' (requester hadn't reviewed/accepted it): just delete
+  ///   it — no units_fulfilled or donation to undo.
+  /// - 'accepted': decrements units_fulfilled, reopens the request to
+  ///   'active' if it had been marked 'fulfilled', AND deletes the
+  ///   auto-added verified donation record (via the donation_doc_id stored
+  ///   on the offer) so History/badges don't keep credit for a donation
+  ///   that's no longer happening.
+  Future<void> _cancelHelp(String requestId, {required bool wasAccepted}) async {
     HapticFeedback.lightImpact();
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Can't make it?", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('This will free up your slot for other donors, and the requester will be notified.'),
+        title: Text(wasAccepted ? "Can't make it?" : 'Withdraw your offer?', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(wasAccepted
+            ? 'This will free up your slot for other donors, remove the donation from your history, and the requester will be notified.'
+            : 'The requester will no longer see your offer for this request.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: Text('Stay committed', style: TextStyle(color: Colors.grey.shade600))),
+              child: Text('Stay', style: TextStyle(color: Colors.grey.shade600))),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-              child: const Text('Cancel my help')),
+              child: Text(wasAccepted ? 'Cancel my help' : 'Withdraw offer')),
         ],
       ),
     );
@@ -303,14 +473,26 @@ class _NearbySosSectionState extends State<NearbySosSection> {
     final acceptanceRef = docRef.collection('acceptances').doc(uid);
 
     try {
+      if (!wasAccepted) {
+        // Still pending — nothing else was ever touched, so a plain delete
+        // fully undoes the offer.
+        await acceptanceRef.delete();
+        return;
+      }
+
       String? requesterUid;
       String bloodGroup = '';
+      String? donationDocId;
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(docRef);
         if (!snap.exists) return;
         final data = snap.data() as Map<String, dynamic>;
         requesterUid = data['requester_uid'];
         bloodGroup = (data['blood_group'] ?? '').toString();
+
+        final offerSnap = await tx.get(acceptanceRef);
+        donationDocId = offerSnap.exists ? (offerSnap.data() as Map<String, dynamic>)['donation_doc_id'] : null;
+
         final unitsFulfilled = _asInt(data['units_fulfilled'], fallback: 0);
         final newFulfilled = (unitsFulfilled - 1) < 0 ? 0 : unitsFulfilled - 1;
         tx.delete(acceptanceRef);
@@ -318,13 +500,16 @@ class _NearbySosSectionState extends State<NearbySosSection> {
           'units_fulfilled': newFulfilled,
           'status': 'active', // always reopens — a cancellation means a slot is free again
         });
+        if (donationDocId != null) {
+          tx.delete(FirebaseFirestore.instance.collection('donors').doc(uid).collection('donations').doc(donationDocId));
+        }
       });
 
       if (requesterUid != null) {
         FirebaseFirestore.instance.collection('notifications').doc(requesterUid).collection('items').add({
           'type': 'sos_cancelled',
           'title': 'Donor unavailable 😔',
-          'message': 'A donor had to back out of your $bloodGroup request. A slot is open again.',
+          'body': 'A donor had to back out of your $bloodGroup request. A slot is open again.',
           'read': false,
           'createdAt': FieldValue.serverTimestamp(),
         }).catchError((_) {});
@@ -523,14 +708,30 @@ class _NearbySosSectionState extends State<NearbySosSection> {
           .collection('sos_requests')
           .doc(item.id)
           .collection('acceptances')
-          .orderBy('accepted_at')
+          .orderBy('offered_at')
           .snapshots(),
       builder: (context, accSnap) {
         final acceptanceDocs = accSnap.data?.docs ?? const [];
+        // Backward-compatible: a doc with no 'status' field is treated as
+        // accepted (covers any acceptance docs created before this offer/
+        // accept split). Pending offers are the ones still awaiting the
+        // requester's decision.
+        final acceptedDocs = acceptanceDocs.where((d) => (d.data() as Map<String, dynamic>)['status'] != 'pending').toList();
+        final pendingDocs = acceptanceDocs.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'pending').toList();
         final unitsNeeded = _asInt(item.data['units']);
-        final unitsFulfilled = acceptanceDocs.length;
+        final unitsFulfilled = acceptedDocs.length;
         final isFull = unitsFulfilled >= unitsNeeded;
-        final iAmHelping = myUid != null && acceptanceDocs.any((d) => d.id == myUid);
+        QueryDocumentSnapshot? myOfferDoc;
+        if (myUid != null) {
+          for (final d in acceptanceDocs) {
+            if (d.id == myUid) { myOfferDoc = d; break; }
+          }
+        }
+        final myOfferData = myOfferDoc?.data() as Map<String, dynamic>?;
+        final iAmAccepted = myOfferData != null && myOfferData['status'] != 'pending';
+        final iAmPending = myOfferData != null && myOfferData['status'] == 'pending';
+        final iAmHelping = iAmAccepted || iAmPending; // any state where I've already acted
+        final isAvailable = widget.userData?['is_available'] == true;
         final isAccepting = _accepting.contains(item.id);
 
         return Container(
@@ -574,7 +775,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
                   ),
                 )
               else if (widget.role == 'donor')
-                iAmHelping
+                iAmAccepted
                     ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -589,16 +790,45 @@ class _NearbySosSectionState extends State<NearbySosSection> {
                     ),
                     const SizedBox(width: 10),
                     GestureDetector(
-                      onTap: () => _cancelHelp(item.id),
+                      onTap: () => _cancelHelp(item.id, wasAccepted: true),
                       child: Text('Cancel', style: TextStyle(color: Colors.red.shade400, fontSize: 10, fontWeight: FontWeight.w600)),
                     ),
                   ]),
+                ])
+                    : iAmPending
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Text('Offer sent ⏳', style: TextStyle(color: Colors.amber.shade800, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: () => _cancelHelp(item.id, wasAccepted: false),
+                    child: Text('Withdraw', style: TextStyle(color: Colors.red.shade400, fontSize: 10, fontWeight: FontWeight.w600)),
+                  ),
                 ])
                     : isFull
                     ? Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(8)),
                     child: Text('Fulfilled ✅', style: TextStyle(color: Colors.grey.shade600, fontSize: 11, fontWeight: FontWeight.w600)))
+                // Not currently available to donate — can't safely commit to
+                // this request right now, but can still spread the word.
+                // Same fallback treatment as an incompatible blood group.
+                    : !isAvailable
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('Not available', style: TextStyle(color: Colors.grey.shade400, fontSize: 9, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  OutlinedButton(
+                    onPressed: () => _showDetailsSheet(item.data, item.distance),
+                    style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    child: const Text('Notify', style: TextStyle(fontSize: 12)),
+                  ),
+                ])
                     : BloodCompatibility.canDonate(
                   (widget.userData?['blood_group'] ?? '').toString(),
                   (item.data['blood_group'] ?? '').toString(),
@@ -612,7 +842,7 @@ class _NearbySosSectionState extends State<NearbySosSection> {
                         minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                     child: isAccepting
                         ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('Help', style: TextStyle(fontSize: 12)))
+                        : const Text("I'll Help", style: TextStyle(fontSize: 12)))
                 // Blood group isn't compatible — this donor can't safely give
                 // blood for this request, but can still spread the word.
                     : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -637,13 +867,79 @@ class _NearbySosSectionState extends State<NearbySosSection> {
                   child: const Text('View', style: TextStyle(fontSize: 12)),
                 ),
             ]),
-            // Donor list — only the requester (isMine) needs to see who's
-            // coming and be able to call them. Others just see the count above.
-            if (isMine && acceptanceDocs.isNotEmpty) ...[
+            // Pending offers — only the requester (isMine) reviews these:
+            // a profile summary plus Call/Message to vet the donor, then
+            // Accept (commits the slot + auto-verifies the donation) or
+            // Decline (frees the donor to help someone else).
+            if (isMine && pendingDocs.isNotEmpty) ...[
               const SizedBox(height: 10),
               const Divider(height: 1),
               const SizedBox(height: 8),
-              ...acceptanceDocs.map((doc) {
+              Text('Offers to review', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+              const SizedBox(height: 6),
+              ...pendingDocs.map((doc) {
+                final d = doc.data() as Map<String, dynamic>;
+                final donorUid = doc.id;
+                final confirming = _accepting.contains('${item.id}-$donorUid');
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade200),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(d['donor_name'] ?? 'Donor', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${d['donor_blood_group'] ?? ''}'
+                              '${d['donor_age'] != null ? ' • ${d['donor_age']} yrs' : ''}'
+                              '${(d['donor_city'] ?? '').toString().isNotEmpty ? ' • ${d['donor_city']}' : ''}',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                        ),
+                      ])),
+                      GestureDetector(
+                        onTap: () => _callPhone(d['donor_phone'] ?? ''),
+                        child: Padding(padding: const EdgeInsets.all(4), child: Icon(Icons.call, size: 16, color: color)),
+                      ),
+                      GestureDetector(
+                        onTap: () => _messageDonor(d['donor_phone'] ?? ''),
+                        child: Padding(padding: const EdgeInsets.all(4), child: Icon(Icons.sms_outlined, size: 16, color: color)),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: OutlinedButton(
+                        onPressed: confirming ? null : () => _declineDonorOffer(item.id, donorUid, d, item.data),
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red.shade400, side: BorderSide(color: Colors.red.shade200),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                        child: const Text('Decline', style: TextStyle(fontSize: 11)),
+                      )),
+                      const SizedBox(width: 8),
+                      Expanded(child: ElevatedButton(
+                        onPressed: confirming ? null : () => _acceptDonorOffer(item.id, donorUid, item.data),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                        child: confirming
+                            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Text('Accept', style: TextStyle(fontSize: 11)),
+                      )),
+                    ]),
+                  ]),
+                );
+              }),
+            ],
+            // Confirmed helpers — donors the requester has already accepted.
+            if (isMine && acceptedDocs.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              ...acceptedDocs.map((doc) {
                 final d = doc.data() as Map<String, dynamic>;
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),

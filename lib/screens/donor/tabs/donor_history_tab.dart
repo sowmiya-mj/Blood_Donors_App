@@ -581,7 +581,9 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
             const SizedBox(height: 2),
             Text(data['location'] ?? '', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
             const SizedBox(height: 2),
-            Text(data['date_display'] ?? data['date'] ?? '',
+            Text(
+                (data['date_display'] is String ? data['date_display'] as String : null) ??
+                    (data['date'] is String ? data['date'] as String : '') ,
                 style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
           ])),
           Container(

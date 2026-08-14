@@ -102,7 +102,8 @@ class _DonorHomeTabState extends State<DonorHomeTab>
   Map<String, dynamic> _computeEligibility(List<QueryDocumentSnapshot> donations) {
     if (donations.isEmpty) return {'eligible': true, 'daysLeft': 0};
     final latest = donations.first.data() as Map<String, dynamic>;
-    final dateStr = latest['date'] as String?;
+    final rawDate = latest['date'];
+    final dateStr = rawDate is String ? rawDate : null;
     final type = latest['type'] as String? ?? 'Whole Blood';
     final lastDate = dateStr != null ? DateTime.tryParse(dateStr) : null;
     if (lastDate == null) return {'eligible': true, 'daysLeft': 0};
