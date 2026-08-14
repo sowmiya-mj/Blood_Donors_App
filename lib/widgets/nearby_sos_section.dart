@@ -25,9 +25,12 @@ import '../utils/blood_compatibility.dart';
 /// so more than one donor can help the same request. `units_fulfilled` on
 /// the parent doc mirrors the acceptance count (kept in sync inside the
 /// same transaction) purely so list queries / cards don't need to read the
-/// subcollection just to know "is this full yet". Status auto-flips to
-/// 'fulfilled' once units_fulfilled >= units, and reopens to 'active' if a
-/// donor cancels and drops it back below that.
+/// subcollection just to know "is this full yet". Status does NOT
+/// auto-flip to 'fulfilled' just because units_fulfilled >= units — the
+/// requester always closes the request explicitly via the "Mark done"
+/// button (_deactivateSos), for both 1-unit and multi-unit requests alike.
+/// New accepts are still blocked once units_fulfilled >= units (see the
+/// 'full' check in _acceptDonorOffer).
 class NearbySosSection extends StatefulWidget {
   final Color color;
   final String role;
@@ -262,8 +265,9 @@ class _NearbySosSectionState extends State<NearbySosSection> {
 
   /// Accept flow (Stage 2 of 2) — the REQUESTER calls this after reviewing a
   /// pending offer. Atomically: re-checks a slot is still open, flips the
-  /// offer to 'accepted', bumps units_fulfilled (+ flips the request to
-  /// 'fulfilled' if that was the last slot). After the transaction commits,
+  /// offer to 'accepted', bumps units_fulfilled (request status is left
+  /// untouched here — closing the request is always a separate, explicit
+  /// "Mark done" action, see _deactivateSos). After the transaction commits,
   /// also (a) writes a verified donation record for the donor so their
   /// History tab / badges update automatically, and (b) notifies the donor.
   Future<void> _acceptDonorOffer(String requestId, String donorUid, Map<String, dynamic> requestData) async {
@@ -296,9 +300,13 @@ class _NearbySosSectionState extends State<NearbySosSection> {
           'accepted_at': FieldValue.serverTimestamp(),
           'donation_doc_id': donationRef.id,
         });
+        // Note: status is deliberately NOT auto-flipped to 'fulfilled' here,
+        // even when newFulfilled >= unitsNeeded. This keeps 1-unit and
+        // multi-unit requests consistent — the requester always closes the
+        // request explicitly via the "Mark done" button (_deactivateSos),
+        // regardless of how many units were needed.
         tx.update(docRef, {
           'units_fulfilled': newFulfilled,
-          if (newFulfilled >= unitsNeeded) 'status': 'fulfilled',
         });
         tx.set(donationRef, {
           'type': 'Whole Blood',
