@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
 
+
 class DonorSearchTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
   final Color primaryColor;
@@ -58,6 +59,24 @@ class _DonorSearchTabState extends State<DonorSearchTab>
   late Animation<double> _fadeAnim;
 
   final List<String> _bloodGroups = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+
+  // Kept in sync with donor_history_tab.dart / donor_profile_tab.dart's badge
+  // tiers (same verified-donation thresholds) so the badge shown here always
+  // matches what the donor sees on their own profile.
+  static const List<Map<String, Object>> _badges = [
+    {'icon': '🏅', 'label': '1st Donation', 'target': 1},
+    {'icon': '⭐', 'label': '3 Donations', 'target': 3},
+    {'icon': '🏆', 'label': '5 Donations', 'target': 5},
+    {'icon': '💎', 'label': '10 Donations', 'target': 10},
+  ];
+
+  Map<String, Object>? _highestEarnedBadge(int verifiedCount) {
+    Map<String, Object>? highest;
+    for (final b in _badges) {
+      if ((b['target'] as int) <= verifiedCount) highest = b;
+    }
+    return highest;
+  }
 
   @override
   void initState() {
@@ -315,6 +334,7 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     final bloodGroup = d['blood_group'] ?? 'N/A';
     final age = d['age']?.toString();
     final phone = d['phone']?.toString();
+    final uid = d['uid']?.toString();
     final location = [d['city'], d['district'], d['state']]
         .where((e) => e != null && e.toString().isNotEmpty).join(', ');
 
@@ -331,8 +351,37 @@ class _DonorSearchTabState extends State<DonorSearchTab>
                     style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)))),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-              const SizedBox(height: 2),
+              Row(children: [
+                Flexible(child: Text(name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E)))),
+                if (uid != null && uid.isNotEmpty)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('donors').doc(uid).collection('donations')
+                        .where('verified', isEqualTo: true)
+                        .snapshots(),
+                    builder: (context, snap) {
+                      final verifiedCount = snap.data?.docs.length ?? 0;
+                      final badge = _highestEarnedBadge(verifiedCount);
+                      if (badge == null) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Tooltip(
+                          message: '${badge['label']} — $verifiedCount verified donation${verifiedCount == 1 ? '' : 's'}',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10)),
+                            child: Text(badge['icon'] as String, style: const TextStyle(fontSize: 13)),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ]),
+              const SizedBox(height: 4),
               Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
                   child: Text('Available to donate', style: TextStyle(fontSize: 11, color: Colors.green.shade600, fontWeight: FontWeight.w600))),

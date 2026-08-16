@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -92,9 +93,18 @@ class _DonorProfileTabState extends State<DonorProfileTab>
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 10)),
-      );
+      Position position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 20)),
+        );
+      } on TimeoutException {
+        // Fresh fix timed out (weak signal / indoors) — fall back to last
+        // known position instead of failing outright.
+        final last = await Geolocator.getLastKnownPosition();
+        if (last == null) rethrow;
+        position = last;
+      }
 
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) return;
@@ -108,7 +118,9 @@ class _DonorProfileTabState extends State<DonorProfileTab>
       _showSnack('Location updated — nearby searches now use your current spot.');
       widget.onDataUpdated();
     } catch (e) {
-      _showSnack('Could not fetch location. Try again.', isError: true);
+      // TODO(debug): remove the ": $e" once root cause is confirmed —
+      // temporary so we can see the real Geolocator exception on-device.
+      _showSnack('Could not fetch location: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isUpdatingLocation = false);
     }
