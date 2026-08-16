@@ -271,7 +271,20 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     if (phone == null || phone.isEmpty) return;
     HapticFeedback.lightImpact();
     final uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    }
   }
 
   Future<void> _messageNumber(String? phone) async {
@@ -280,7 +293,20 @@ class _DonorSearchTabState extends State<DonorSearchTab>
     // Opens the native Messages app — no in-app chat yet, this is the
     // lightweight version until a real chat feature gets built.
     final uri = Uri(scheme: 'sms', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Messages app')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Messages app')),
+        );
+      }
+    }
   }
 
   void _showDonorProfileSheet(Map<String, dynamic> d, Color color) {
