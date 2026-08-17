@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
 import '../donor_hospitals_bloodbanks_map_screen.dart';
+import '../donor_blood_camps_screen.dart';
 
 class DonorHomeTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -414,7 +415,8 @@ class _DonorHomeTabState extends State<DonorHomeTab>
                         builder: (_) => DonorHospitalsBloodBanksMapScreen(primaryColor: widget.primaryColor)))),
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange,
-                        () => _showComingSoon('Blood Camps')),
+                        () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => DonorBloodCampsScreen(donorData: widget.donorData, primaryColor: widget.primaryColor)))),
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.workspace_premium_rounded, 'My\nBadges', Colors.purple,
                         () => widget.onNavigateToBadges != null

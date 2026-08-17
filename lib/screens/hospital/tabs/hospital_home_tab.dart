@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
+import '../../common/camps/my_camps_screen.dart';
 
 class HospitalHomeTab extends StatefulWidget {
   final Map<String, dynamic>? hospitalData;
@@ -208,6 +209,32 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.history_rounded, 'Request\nHistory', Colors.orange, () => widget.onNavigate?.call(1)),
               ]),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: 76,
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => MyCampsScreen(
+                      primaryColor: color,
+                      organizerRole: 'hospital',
+                      organizerName: hospitalName,
+                      organizerPhone: data?['phone']?.toString(),
+                    )));
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.teal.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 3))]),
+                    child: Column(children: [
+                      Icon(Icons.campaign_rounded, color: Colors.teal, size: 26),
+                      const SizedBox(height: 6),
+                      Text('Blood\nCamps', textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1.3)),
+                    ]),
+                  ),
+                ),
+              ),
             ]),
           )),
 

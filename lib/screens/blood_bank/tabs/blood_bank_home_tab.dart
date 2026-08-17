@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
+import '../../common/camps/my_camps_screen.dart';
 
 class BloodBankHomeTab extends StatefulWidget {
   final Map<String, dynamic>? bankData;
@@ -198,6 +199,41 @@ class _BloodBankHomeTabState extends State<BloodBankHomeTab> with TickerProvider
                     );
                   }).toList(),
                 ),
+              ]),
+            )),
+
+            const SizedBox(height: 28),
+
+            // Quick actions
+            FadeTransition(opacity: _cardFade, child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Quick Actions', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => MyCampsScreen(
+                        primaryColor: color,
+                        organizerRole: 'blood_bank',
+                        organizerName: bankName,
+                        organizerPhone: data?['phone']?.toString(),
+                      )));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 3))]),
+                      child: Column(children: [
+                        Icon(Icons.campaign_rounded, color: Colors.orange.shade600, size: 26),
+                        const SizedBox(height: 6),
+                        Text('Blood\nCamps', textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1.3)),
+                      ]),
+                    ),
+                  )),
+                ]),
               ]),
             )),
 
