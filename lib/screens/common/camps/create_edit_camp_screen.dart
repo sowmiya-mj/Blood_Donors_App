@@ -7,12 +7,14 @@ import 'package:http/http.dart' as http;
 
 // Shared by Hospital and Blood Bank roles — pass organizerRole to tag who
 // created the camp. Donor-facing DonorBloodCampsScreen reads organizer_name
-// + organizer_role straight off the saved doc, so no role-specific UI here.
+// + organizer_role + organizer_phone + organizer_email straight off the
+// saved doc, so no role-specific UI here.
 class CreateEditCampScreen extends StatefulWidget {
   final Color primaryColor;
   final String organizerRole; // 'hospital' or 'blood_bank'
   final String organizerName;
   final String? organizerPhone;
+  final String? organizerEmail;
   final Map<String, dynamic>? existingCamp; // null = create, non-null = edit
   final String? campId; // required when existingCamp is non-null
 
@@ -22,6 +24,7 @@ class CreateEditCampScreen extends StatefulWidget {
     required this.organizerRole,
     required this.organizerName,
     this.organizerPhone,
+    this.organizerEmail,
     this.existingCamp,
     this.campId,
   });
@@ -38,6 +41,7 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
   final _cityCtrl = TextEditingController();
   final _startTimeCtrl = TextEditingController();
   final _endTimeCtrl = TextEditingController();
+  final _maxSlotsCtrl = TextEditingController();
 
   DateTime? _selectedDate;
   String? _filterState;
@@ -65,6 +69,8 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
     _cityCtrl.text = c['city'] ?? '';
     _startTimeCtrl.text = c['start_time'] ?? '';
     _endTimeCtrl.text = c['end_time'] ?? '';
+    final maxSlots = (c['max_slots'] as num?)?.toInt() ?? 0;
+    if (maxSlots > 0) _maxSlotsCtrl.text = maxSlots.toString();
     _filterState = c['state'] as String?;
     _filterDistrict = c['district'] as String?;
     final ts = c['date'];
@@ -157,6 +163,7 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
         'organizer_role': widget.organizerRole,
         'organizer_name': widget.organizerName,
         'organizer_phone': widget.organizerPhone ?? '',
+        'organizer_email': widget.organizerEmail ?? '',
         'title': _titleCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'date': Timestamp.fromDate(_selectedDate!),
@@ -167,6 +174,7 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
         'district': _filterDistrict,
         'state': _filterState,
         'status': 'active',
+        'max_slots': int.tryParse(_maxSlotsCtrl.text.trim()) ?? 0, // 0 = unlimited
       };
       if (geo != null) {
         campData['lat'] = geo['lat'];
@@ -177,6 +185,7 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
         await FirebaseFirestore.instance.collection('blood_camps').doc(widget.campId).update(campData);
       } else {
         campData['registered_count'] = 0;
+        campData['waitlist_count'] = 0;
         campData['created_at'] = FieldValue.serverTimestamp();
         await FirebaseFirestore.instance.collection('blood_camps').add(campData);
       }
@@ -210,6 +219,7 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
     _cityCtrl.dispose();
     _startTimeCtrl.dispose();
     _endTimeCtrl.dispose();
+    _maxSlotsCtrl.dispose();
     super.dispose();
   }
 
@@ -251,11 +261,8 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
               child: InputDecorator(
                 decoration: _inputDecoration('Select date', color),
                 child: Text(
-                  _selectedDate == null
-                      ? 'Tap to select'
-                      : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
-                  style: TextStyle(
-                      color: _selectedDate == null ? Colors.grey.shade400 : const Color(0xFF1A1A2E)),
+                  _selectedDate == null ? 'Tap to select' : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
+                  style: TextStyle(color: _selectedDate == null ? Colors.grey.shade400 : const Color(0xFF1A1A2E)),
                 ),
               ),
             ),
@@ -271,6 +278,18 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
                 TextFormField(controller: _endTimeCtrl, decoration: _inputDecoration('4:00 PM', color)),
               ])),
             ]),
+            const SizedBox(height: 16),
+            _label('Expected / Max Donors (optional)'),
+            TextFormField(
+              controller: _maxSlotsCtrl,
+              keyboardType: TextInputType.number,
+              decoration: _inputDecoration('e.g. 50 — leave blank for unlimited', color),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Once this many donors confirm, new registrations go to a waitlist automatically.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+            ),
             const SizedBox(height: 16),
             _label('State'),
             DropdownButtonFormField<String>(
@@ -318,12 +337,8 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
                 child: _isSaving
-                    ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text(_isEditing ? 'Save Changes' : 'Publish Camp',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text(_isEditing ? 'Save Changes' : 'Publish Camp', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
               ),
             ),
             const SizedBox(height: 20),
@@ -343,10 +358,8 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
     filled: true,
     fillColor: Colors.white,
     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
-    enabledBorder:
-    OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
-    focusedBorder:
-    OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
   );
 }

@@ -3,14 +3,17 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'create_edit_camp_screen.dart';
+import 'camp_registrations_screen.dart';
 
 // Shared by Hospital and Blood Bank roles. Pass organizerRole + organizerName
-// (+ optional organizerPhone) from whichever dashboard is hosting this.
+// (+ optional organizerPhone / organizerEmail) from whichever dashboard is
+// hosting this.
 class MyCampsScreen extends StatefulWidget {
   final Color primaryColor;
   final String organizerRole; // 'hospital' or 'blood_bank'
   final String organizerName;
   final String? organizerPhone;
+  final String? organizerEmail;
 
   const MyCampsScreen({
     super.key,
@@ -18,6 +21,7 @@ class MyCampsScreen extends StatefulWidget {
     required this.organizerRole,
     required this.organizerName,
     this.organizerPhone,
+    this.organizerEmail,
   });
 
   @override
@@ -75,16 +79,13 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                 organizerRole: widget.organizerRole,
                 organizerName: widget.organizerName,
                 organizerPhone: widget.organizerPhone,
+                organizerEmail: widget.organizerEmail,
               ),
             ),
           );
         },
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // NOTE: equality (organizer_uid) + orderBy(date) needs a composite
-        // index. Firestore will throw a failed-precondition error with a
-        // direct "create index" console link the first time this runs —
-        // just click it once and the index builds itself.
         stream: FirebaseFirestore.instance
             .collection('blood_camps')
             .where('organizer_uid', isEqualTo: _uid)
@@ -112,8 +113,7 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                   const SizedBox(height: 12),
                   Text('No blood camps yet', style: TextStyle(color: Colors.grey.shade500, fontSize: 14)),
                   const SizedBox(height: 4),
-                  Text('Tap "New Camp" to organize your first drive',
-                      style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                  Text('Tap "New Camp" to organize your first drive', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
                 ]),
               ),
             );
@@ -128,6 +128,9 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
               final isCancelled = status == 'cancelled';
               final date = (c['date'] as Timestamp?)?.toDate();
               final regCount = c['registered_count'] ?? 0;
+              final waitlistCount = c['waitlist_count'] ?? 0;
+              final maxSlots = (c['max_slots'] as num?)?.toInt() ?? 0;
+              final isPast = date != null && date.isBefore(DateTime.now());
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -151,7 +154,13 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
                           child: Text('Cancelled',
-                              style: TextStyle(fontSize: 10, color: Colors.red.shade600, fontWeight: FontWeight.w600))),
+                              style: TextStyle(fontSize: 10, color: Colors.red.shade600, fontWeight: FontWeight.w600)))
+                    else if (isPast)
+                      Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                          child: Text('Completed',
+                              style: TextStyle(fontSize: 10, color: Colors.blue.shade600, fontWeight: FontWeight.w600))),
                   ]),
                   const SizedBox(height: 6),
                   if (date != null)
@@ -163,8 +172,7 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                         const SizedBox(width: 10),
                         Icon(Icons.access_time_rounded, size: 13, color: Colors.grey.shade400),
                         const SizedBox(width: 4),
-                        Text(
-                            '${c['start_time']}${(c['end_time'] ?? '').toString().isNotEmpty ? ' - ${c['end_time']}' : ''}',
+                        Text('${c['start_time']}${(c['end_time'] ?? '').toString().isNotEmpty ? ' - ${c['end_time']}' : ''}',
                             style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                       ],
                     ]),
@@ -178,10 +186,41 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                             style: TextStyle(fontSize: 12, color: Colors.grey.shade500))),
                   ]),
                   const SizedBox(height: 10),
-                  Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                      child: Text('$regCount registered', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600))),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CampRegistrationsScreen(
+                            campId: doc.id,
+                            campTitle: c['title'] ?? 'Blood Camp',
+                            organizerName: widget.organizerName,
+                            campDate: date,
+                            primaryColor: color,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Wrap(spacing: 8, runSpacing: 6, children: [
+                      Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(maxSlots > 0 ? '$regCount / $maxSlots registered' : '$regCount registered',
+                                style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+                            const SizedBox(width: 3),
+                            Icon(Icons.chevron_right_rounded, size: 14, color: color),
+                          ])),
+                      if (waitlistCount > 0)
+                        Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+                            child: Text('$waitlistCount waitlisted',
+                                style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
                   if (!isCancelled) ...[
                     const SizedBox(height: 12),
                     Row(children: [
@@ -195,6 +234,7 @@ class _MyCampsScreenState extends State<MyCampsScreen> {
                                       organizerRole: widget.organizerRole,
                                       organizerName: widget.organizerName,
                                       organizerPhone: widget.organizerPhone,
+                                      organizerEmail: widget.organizerEmail,
                                       existingCamp: c,
                                       campId: doc.id,
                                     ))),
