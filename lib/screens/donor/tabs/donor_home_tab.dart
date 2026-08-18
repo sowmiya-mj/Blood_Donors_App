@@ -410,7 +410,7 @@ class _DonorHomeTabState extends State<DonorHomeTab>
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
               Row(children: [
-                _buildActionButton(Icons.location_on_outlined, 'See\nMap', Colors.blue,
+                _buildActionButton(Icons.location_on_outlined, 'view\nMap', Colors.blue,
                         () => Navigator.push(context, MaterialPageRoute(
                         builder: (_) => DonorHospitalsBloodBanksMapScreen(primaryColor: widget.primaryColor)))),
                 const SizedBox(width: 12),

@@ -204,14 +204,13 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                 _buildActionButton(Icons.add_circle_rounded, 'Post\nRequest', color, () => widget.onNavigate?.call(1)),
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.search_rounded, 'Find\nDonors', Colors.purple, () => widget.onNavigate?.call(2)),
-                const SizedBox(width: 12),
-                _buildActionButton(Icons.local_hospital_rounded, 'Blood\nBanks', Colors.green, () => widget.onNavigate?.call(2)),
+
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.history_rounded, 'Request\nHistory', Colors.orange, () => widget.onNavigate?.call(1)),
-              ]),
-              const SizedBox(height: 12),
+
+              const SizedBox(width: 12),
               SizedBox(
-                width: 76,
+                width: 450,
                 child: GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
@@ -235,6 +234,7 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                   ),
                 ),
               ),
+              ]),
             ]),
           )),
 
