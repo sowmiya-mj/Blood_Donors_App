@@ -16,13 +16,28 @@ class NotificationBell extends StatelessWidget {
     required this.primaryColor,
   });
 
-  void _openNotifications(BuildContext context) {
-    Navigator.push(
+  Future<void> _openNotifications(BuildContext context) async {
+    // NotificationListScreen pops with a String message when the tapped
+    // notification has no detail screen yet (request/message types) —
+    // we show that message here, using THIS dashboard's own Scaffold
+    // context, since the notification screen's own Scaffold is gone by
+    // the time it pops.
+    final result = await Navigator.push<String?>(
       context,
       MaterialPageRoute(
         builder: (_) => NotificationListScreen(uid: uid, primaryColor: primaryColor),
       ),
     );
+
+    if (result != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
   }
 
   @override

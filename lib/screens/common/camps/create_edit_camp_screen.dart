@@ -4,9 +4,8 @@ import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
-// NOTE: adjust this relative path if your services folder sits somewhere
-// else — this assumes lib/screens/common/camps/create_edit_camp_screen.dart
-// and lib/services/notification_service.dart.
+// NOTE: verify this relative path matches where notification_service.dart
+// actually lives relative to this file — adjust if the import fails.
 import '../../../services/notification_service.dart';
 
 // Shared by Hospital and Blood Bank roles — pass organizerRole to tag who
@@ -191,10 +190,14 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
         campData['registered_count'] = 0;
         campData['waitlist_count'] = 0;
         campData['created_at'] = FieldValue.serverTimestamp();
-        final campRef = await FirebaseFirestore.instance.collection('blood_camps').add(campData);
-        // Fire-and-forget: notification failure should never block camp
-        // creation from succeeding.
-        _notifyNearbyDonors(campRef.id, campData);
+        final docRef = await FirebaseFirestore.instance.collection('blood_camps').add(campData);
+        // Fire-and-forget: never let a notification failure block camp
+        // creation, which already succeeded above.
+        _notifyNearbyDonors(
+          campId: docRef.id,
+          title: campData['title'] as String,
+          district: _filterDistrict!,
+        );
       }
 
       if (mounted) {
@@ -208,42 +211,35 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
     }
   }
 
-  // Notifies donors in the same district as the camp. District-level match
-  // (not radius/state) keeps this simple and avoids spamming everyone —
-  // easy to widen to state-level later if district match returns too few.
-  Future<void> _notifyNearbyDonors(String campId, Map<String, dynamic> campData) async {
+  // Notifies every donor whose stored `district` matches the camp's
+  // district. Silent no-op if the query matches zero donors — most likely
+  // cause is the donor's saved `district` string not exactly matching this
+  // camp's `district` value (case/spelling), since this is a plain
+  // isEqualTo match. Worth spot-checking in Firestore console if donors
+  // in the right area still report never seeing the notification.
+  Future<void> _notifyNearbyDonors({
+    required String campId,
+    required String title,
+    required String district,
+  }) async {
     try {
-      final district = (campData['district'] ?? '').toString();
-      if (district.isEmpty) return;
-
-      final donorsSnap = await FirebaseFirestore.instance
+      final donors = await FirebaseFirestore.instance
           .collection('donors')
           .where('district', isEqualTo: district)
           .get();
-      if (donorsSnap.docs.isEmpty) return;
 
-      final dateStr = _formatDate(campData['date']);
-      final title = 'New Blood Camp near you';
-      final body = '${campData['title']} on $dateStr at ${campData['city']}. Tap to register!';
-
-      await Future.wait(donorsSnap.docs.map((d) => NotificationService.send(
-        toUid: d.id,
-        type: 'new_camp',
-        title: title,
-        body: body,
-        relatedId: campId,
-      )));
+      for (final doc in donors.docs) {
+        await NotificationService.send(
+          toUid: doc.id,
+          type: 'new_camp',
+          title: 'New Blood Camp Near You',
+          body: '$title is happening in $district. Tap to view details.',
+          relatedId: campId,
+        );
+      }
     } catch (_) {
-      // Never let a notification failure surface to the organizer.
+      // Never block camp creation on notification failure.
     }
-  }
-
-  String _formatDate(dynamic ts) {
-    if (ts is Timestamp) {
-      final d = ts.toDate();
-      return '${d.day}/${d.month}/${d.year}';
-    }
-    return '';
   }
 
   void _showSnack(String msg, {bool isError = false}) {

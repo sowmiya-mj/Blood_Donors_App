@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import '../../services/notification_service.dart';
-import '../donor/donor_blood_camps_screen.dart';
+import '../../screens/donor/donor_blood_camps_screen.dart';
 
 class NotificationListScreen extends StatelessWidget {
   final String uid;
@@ -26,7 +26,7 @@ class NotificationListScreen extends StatelessWidget {
       case 'message':
         return (Icons.chat_bubble_rounded, Colors.blue);
       case 'new_camp':
-        return (Icons.campaign_rounded, Colors.teal);
+        return (Icons.campaign_rounded, Colors.deepPurple);
       default:
         return (Icons.notifications_rounded, Colors.orange);
     }
@@ -41,45 +41,62 @@ class NotificationListScreen extends StatelessWidget {
     return '${diff.inDays}d ago';
   }
 
-  Future<void> _onTapNotification(BuildContext context, String notifId, Map<String, dynamic> data) async {
+  Future<void> _onTapNotification(
+      BuildContext context, String notifId, Map<String, dynamic> data) async {
     HapticFeedback.lightImpact();
     NotificationService.markAsRead(uid, notifId);
+
     final type = data['type'] as String? ?? '';
 
-    // Blood camp notifications have a real destination — open it directly.
+    // new_camp -> real navigation. Fetch the donor doc fresh (not cached from
+    // whatever screen opened this list) so DonorBloodCampsScreen always gets
+    // current data.
     if (type == 'new_camp') {
-      final donorSnap = await FirebaseFirestore.instance.collection('donors').doc(uid).get();
-      if (!context.mounted) return;
-      if (donorSnap.exists) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => Center(child: CircularProgressIndicator(color: primaryColor)),
+      );
+
+      try {
+        final donorDoc =
+        await FirebaseFirestore.instance.collection('donors').doc(uid).get();
+
+        if (!context.mounted) return;
+        Navigator.pop(context); // close loading dialog
+
+        if (!donorDoc.exists) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not load your profile. Try again.')),
+          );
+          return;
+        }
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => DonorBloodCampsScreen(donorData: donorSnap.data(), primaryColor: primaryColor),
+            builder: (_) => DonorBloodCampsScreen(
+              donorData: donorDoc.data(),
+              primaryColor: primaryColor,
+            ),
           ),
         );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open camp details')));
+      } catch (_) {
+        if (!context.mounted) return;
+        Navigator.pop(context); // close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Something went wrong opening Blood Camps.')),
+        );
       }
       return;
     }
 
-    // SOS requests and chat don't have a dedicated detail screen yet — the
-    // SOS section is embedded directly in each role's Home tab rather than
-    // a separate route, and in-app messaging is still deferred. Best we can
-    // do for now is send them back to their dashboard, where the live
-    // request/conversation already surfaces.
-    Navigator.popUntil(context, (route) => route.isFirst);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(type == 'message'
-              ? 'Check your Home tab for this conversation'
-              : 'Check your Home tab for this request'),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-    }
+    // request / message / request_accepted / request_declined -> no detail
+    // screen exists yet (SOS is an embedded Home-tab widget, chat is still
+    // deferred). Pop back to whichever dashboard opened this list and let
+    // that screen show a "check your Home tab" snackbar with its own
+    // context (see NotificationBell._openNotifications).
+    Navigator.pop(context, 'Check your Home tab for the latest updates.');
   }
 
   @override
