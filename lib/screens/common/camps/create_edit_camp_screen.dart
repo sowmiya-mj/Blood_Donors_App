@@ -4,6 +4,10 @@ import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+// NOTE: adjust this relative path if your services folder sits somewhere
+// else — this assumes lib/screens/common/camps/create_edit_camp_screen.dart
+// and lib/services/notification_service.dart.
+import '../../../services/notification_service.dart';
 
 // Shared by Hospital and Blood Bank roles — pass organizerRole to tag who
 // created the camp. Donor-facing DonorBloodCampsScreen reads organizer_name
@@ -187,7 +191,10 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
         campData['registered_count'] = 0;
         campData['waitlist_count'] = 0;
         campData['created_at'] = FieldValue.serverTimestamp();
-        await FirebaseFirestore.instance.collection('blood_camps').add(campData);
+        final campRef = await FirebaseFirestore.instance.collection('blood_camps').add(campData);
+        // Fire-and-forget: notification failure should never block camp
+        // creation from succeeding.
+        _notifyNearbyDonors(campRef.id, campData);
       }
 
       if (mounted) {
@@ -199,6 +206,44 @@ class _CreateEditCampScreenState extends State<CreateEditCampScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  // Notifies donors in the same district as the camp. District-level match
+  // (not radius/state) keeps this simple and avoids spamming everyone —
+  // easy to widen to state-level later if district match returns too few.
+  Future<void> _notifyNearbyDonors(String campId, Map<String, dynamic> campData) async {
+    try {
+      final district = (campData['district'] ?? '').toString();
+      if (district.isEmpty) return;
+
+      final donorsSnap = await FirebaseFirestore.instance
+          .collection('donors')
+          .where('district', isEqualTo: district)
+          .get();
+      if (donorsSnap.docs.isEmpty) return;
+
+      final dateStr = _formatDate(campData['date']);
+      final title = 'New Blood Camp near you';
+      final body = '${campData['title']} on $dateStr at ${campData['city']}. Tap to register!';
+
+      await Future.wait(donorsSnap.docs.map((d) => NotificationService.send(
+        toUid: d.id,
+        type: 'new_camp',
+        title: title,
+        body: body,
+        relatedId: campId,
+      )));
+    } catch (_) {
+      // Never let a notification failure surface to the organizer.
+    }
+  }
+
+  String _formatDate(dynamic ts) {
+    if (ts is Timestamp) {
+      final d = ts.toDate();
+      return '${d.day}/${d.month}/${d.year}';
+    }
+    return '';
   }
 
   void _showSnack(String msg, {bool isError = false}) {

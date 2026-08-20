@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -171,6 +172,10 @@ class _DonorProfileTabState extends State<DonorProfileTab>
   }
 
   Future<void> _pickAndUpload(ImageSource source) async {
+    if (kIsWeb) {
+      _showSnack('Profile photos aren\'t available in the web preview yet — try this on the Android app.', isError: true);
+      return;
+    }
     final picker = ImagePicker();
     final XFile? file = await picker.pickImage(source: source, maxWidth: 800, imageQuality: 80);
     if (file == null) return;
@@ -202,7 +207,9 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     setState(() => _uploadingPhoto = true);
     try {
       final path = widget.donorData?['photo_path'] as String?;
-      if (path != null) {
+      // File deletion is a mobile-only concept — on web there's no local
+      // file to delete, just clear the Firestore field below.
+      if (!kIsWeb && path != null) {
         final f = File(path);
         if (await f.exists()) await f.delete();
       }
@@ -364,7 +371,11 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
     final photoPath = data?['photo_path'] as String?;
-    final hasLocalPhoto = photoPath != null && File(photoPath).existsSync();
+    // dart:io's File has no web implementation (this is exactly what threw
+    // "Unsupported operation: _Namespace" — that check ran on every build()).
+    // Local-device photo storage is mobile-only by design; on web we just
+    // fall back to the initials avatar instead of crashing.
+    final hasLocalPhoto = !kIsWeb && photoPath != null && File(photoPath).existsSync();
     return SafeArea(
       child: FadeTransition(
         opacity: _fadeAnim,

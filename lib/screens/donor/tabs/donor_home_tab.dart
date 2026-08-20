@@ -409,22 +409,37 @@ class _DonorHomeTabState extends State<DonorHomeTab>
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
               const SizedBox(height: 12),
-              Row(children: [
-                _buildActionButton(Icons.location_on_outlined, 'view\nMap', Colors.blue,
-                        () => Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => DonorHospitalsBloodBanksMapScreen(primaryColor: widget.primaryColor)))),
-                const SizedBox(width: 12),
-                _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange,
-                        () => Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => DonorBloodCampsScreen(donorData: widget.donorData, primaryColor: widget.primaryColor)))),
-                const SizedBox(width: 12),
-                _buildActionButton(Icons.workspace_premium_rounded, 'My\nBadges', Colors.purple,
-                        () => widget.onNavigateToBadges != null
-                        ? widget.onNavigateToBadges!()
-                        : _showComingSoon('Badges')),
-                const SizedBox(width: 12),
-                _buildActionButton(Icons.share_rounded, 'Share\nApp', Colors.green, _shareApp),
-              ]),
+              Builder(builder: (context) {
+                final startOfToday = DateTime.now();
+                final today = DateTime(startOfToday.year, startOfToday.month, startOfToday.day);
+                return StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('blood_camps')
+                      .where('status', isEqualTo: 'active')
+                      .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
+                      .snapshots(),
+                  builder: (context, campSnap) {
+                    final campsCount = campSnap.data?.docs.length ?? 0;
+                    return Row(children: [
+                      _buildActionButton(Icons.location_on_outlined, 'view\nMap', Colors.blue,
+                              () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => DonorHospitalsBloodBanksMapScreen(primaryColor: widget.primaryColor)))),
+                      const SizedBox(width: 12),
+                      _buildActionButton(Icons.campaign_rounded, 'Blood\nCamps', Colors.orange,
+                              () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => DonorBloodCampsScreen(donorData: widget.donorData, primaryColor: widget.primaryColor))),
+                          badgeCount: campsCount),
+                      const SizedBox(width: 12),
+                      _buildActionButton(Icons.workspace_premium_rounded, 'My\nBadges', Colors.purple,
+                              () => widget.onNavigateToBadges != null
+                              ? widget.onNavigateToBadges!()
+                              : _showComingSoon('Badges')),
+                      const SizedBox(width: 12),
+                      _buildActionButton(Icons.share_rounded, 'Share\nApp', Colors.green, _shareApp),
+                    ]);
+                  },
+                );
+              }),
             ]),
           )),
           const SizedBox(height: 30),
@@ -577,7 +592,7 @@ class _DonorHomeTabState extends State<DonorHomeTab>
     );
   }
 
-  Widget _buildActionButton(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _buildActionButton(IconData icon, String label, Color color, VoidCallback onTap, {int? badgeCount}) {
     return Expanded(child: GestureDetector(
       onTap: () { HapticFeedback.lightImpact(); onTap(); },
       child: Container(
@@ -585,7 +600,27 @@ class _DonorHomeTabState extends State<DonorHomeTab>
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
             boxShadow: [BoxShadow(color: color.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 3))]),
         child: Column(children: [
-          Icon(icon, color: color, size: 26),
+          Stack(clipBehavior: Clip.none, children: [
+            Icon(icon, color: color, size: 26),
+            if (badgeCount != null && badgeCount > 0)
+              Positioned(
+                right: -8, top: -6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  constraints: const BoxConstraints(minWidth: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white, width: 1.2),
+                  ),
+                  child: Text(
+                    badgeCount > 9 ? '9+' : '$badgeCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+          ]),
           const SizedBox(height: 6),
           Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1.3)),
         ]),

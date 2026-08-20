@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import '../../services/notification_service.dart';
+import '../donor/donor_blood_camps_screen.dart';
 
 class NotificationListScreen extends StatelessWidget {
   final String uid;
@@ -24,6 +25,8 @@ class NotificationListScreen extends StatelessWidget {
         return (Icons.cancel_rounded, Colors.grey);
       case 'message':
         return (Icons.chat_bubble_rounded, Colors.blue);
+      case 'new_camp':
+        return (Icons.campaign_rounded, Colors.teal);
       default:
         return (Icons.notifications_rounded, Colors.orange);
     }
@@ -38,22 +41,45 @@ class NotificationListScreen extends StatelessWidget {
     return '${diff.inDays}d ago';
   }
 
-  void _onTapNotification(BuildContext context, String notifId, Map<String, dynamic> data) {
+  Future<void> _onTapNotification(BuildContext context, String notifId, Map<String, dynamic> data) async {
     HapticFeedback.lightImpact();
     NotificationService.markAsRead(uid, notifId);
-
     final type = data['type'] as String? ?? '';
-    // NOTE: request/chat detail screens are built in later phases (Phase 3 & 4).
-    // For now, tapping just marks read and shows what it would open — this gets
-    // wired to real navigation once those screens exist.
-    String target = type == 'message' ? 'Chat screen' : 'Request screen';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Opens $target (coming in a later phase)'),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
+
+    // Blood camp notifications have a real destination — open it directly.
+    if (type == 'new_camp') {
+      final donorSnap = await FirebaseFirestore.instance.collection('donors').doc(uid).get();
+      if (!context.mounted) return;
+      if (donorSnap.exists) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DonorBloodCampsScreen(donorData: donorSnap.data(), primaryColor: primaryColor),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open camp details')));
+      }
+      return;
+    }
+
+    // SOS requests and chat don't have a dedicated detail screen yet — the
+    // SOS section is embedded directly in each role's Home tab rather than
+    // a separate route, and in-app messaging is still deferred. Best we can
+    // do for now is send them back to their dashboard, where the live
+    // request/conversation already surfaces.
+    Navigator.popUntil(context, (route) => route.isFirst);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(type == 'message'
+              ? 'Check your Home tab for this conversation'
+              : 'Check your Home tab for this request'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
   }
 
   @override
@@ -75,14 +101,11 @@ class NotificationListScreen extends StatelessWidget {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-
         stream: NotificationService.notificationsStream(uid),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return Center(child: CircularProgressIndicator(color: primaryColor));
           }
-
-
 
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) {
@@ -98,7 +121,6 @@ class NotificationListScreen extends StatelessWidget {
               ),
             );
           }
-
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
