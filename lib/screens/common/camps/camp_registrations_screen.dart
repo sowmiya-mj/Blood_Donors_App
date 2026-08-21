@@ -101,12 +101,23 @@ class _CampRegistrationsScreenState extends State<CampRegistrationsScreen> {
       await FirebaseFirestore.instance.collection('donors').doc(donorUid).collection('donations').add({
         'type': 'Whole Blood',
         'location': widget.campTitle,
+        // FIX: 'date' was missing here — Donor History tab queries this
+        // subcollection with .orderBy('date', descending: true), and
+        // Firestore silently DROPS any doc lacking the orderBy field from
+        // the results. Every camp-verified donation was invisible in
+        // History because of this. Matches the string format the manual
+        // "Log Donation" entries already use, so both sort correctly
+        // together.
+        'date': widget.campDate != null ? DateFormat('yyyy-MM-dd').format(widget.campDate!) : '',
         'date_display': widget.campDate != null ? DateFormat('d MMM yyyy').format(widget.campDate!) : '',
         'units': 1,
         'verified': true,
         'source': 'camp',
         'camp_id': widget.campId,
         'camp_title': widget.campTitle,
+        // Needed so the certificate can be regenerated later from just
+        // this donation doc, without an extra read back to blood_camps.
+        'organizer_name': widget.organizerName,
         'created_at': FieldValue.serverTimestamp(),
       });
       await reg.reference.update({'certificate_issued': true});

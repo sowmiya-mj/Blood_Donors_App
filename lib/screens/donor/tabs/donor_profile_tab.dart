@@ -9,12 +9,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import '../donor_edit_profile_screen.dart';
 import '../../auth/role_selection_screen.dart';
+import '../donor_certificates_screen.dart';
 
 class DonorProfileTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -270,83 +267,6 @@ class _DonorProfileTabState extends State<DonorProfileTab>
     }
   }
 
-  // ── Certificate ────────────────────────────────────────────────
-  // Only ever called when verifiedCount > 0 (button is hidden otherwise).
-  // Uses verified donations only — same integrity reasoning as badges,
-  // since self-reported entries can't be confirmed by a third party.
-  Future<void> _downloadCertificate(String name, String bloodGroup, int verifiedCount) async {
-    HapticFeedback.lightImpact();
-    try {
-      final doc = pw.Document();
-      final issueDate = DateFormat('d MMMM yyyy').format(DateTime.now());
-      final livesHelped = verifiedCount * 3;
-
-      // Logo is bundled as an app asset (see pubspec.yaml note). If it's
-      // ever missing for some reason, the certificate still renders fine
-      // without it rather than crashing the whole download.
-      pw.MemoryImage? logo;
-      try {
-        final logoBytes = await rootBundle.load('assets/images/bloodlink_logo.png');
-        logo = pw.MemoryImage(logoBytes.buffer.asUint8List());
-      } catch (_) {
-        logo = null;
-      }
-
-      doc.addPage(pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        build: (context) => pw.Container(
-          padding: const pw.EdgeInsets.all(40),
-          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red400, width: 3)),
-          child: pw.Center(
-            child: pw.Column(
-              mainAxisAlignment: pw.MainAxisAlignment.center,
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                if (logo != null) ...[
-                  pw.Image(logo, width: 70, height: 70),
-                  pw.SizedBox(height: 10),
-                ],
-                pw.Text('BloodLink', style: pw.TextStyle(fontSize: 26, fontWeight: pw.FontWeight.bold, color: PdfColors.red700)),
-                pw.Text("Your Blood. Someone's Tomorrow.", style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
-                pw.SizedBox(height: 30),
-                pw.Text('CERTIFICATE OF APPRECIATION', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(height: 30),
-                pw.Text('This certificate is proudly presented to', style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
-                pw.SizedBox(height: 10),
-                pw.Text(name, style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold, color: PdfColors.red700)),
-                pw.SizedBox(height: 10),
-                pw.Text('Blood Group: $bloodGroup', style: const pw.TextStyle(fontSize: 12)),
-                pw.SizedBox(height: 20),
-                pw.Text(
-                  'In recognition of $verifiedCount verified blood donation${verifiedCount == 1 ? '' : 's'},\n'
-                      'helping save up to $livesHelped ${livesHelped == 1 ? 'life' : 'lives'}.',
-                  textAlign: pw.TextAlign.center,
-                  style: const pw.TextStyle(fontSize: 13),
-                ),
-                pw.SizedBox(height: 40),
-                pw.Text('Issued on $issueDate', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
-                pw.SizedBox(height: 24),
-                // Signature-line style sign-off, replacing the old em-dash
-                // ("—") which the default PDF font can't render — it was
-                // showing up as a tofu box (□) instead of a dash.
-                pw.Container(width: 130, height: 1, color: PdfColors.grey400),
-                pw.SizedBox(height: 6),
-                pw.Text('BloodLink Team', style: pw.TextStyle(fontSize: 12, fontStyle: pw.FontStyle.italic, color: PdfColors.grey700)),
-              ],
-            ),
-          ),
-        ),
-      ));
-
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: 'BloodLink_Certificate_${name.replaceAll(' ', '_')}.pdf',
-      );
-    } catch (_) {
-      _showSnack('Could not generate certificate. Try again.', isError: true);
-    }
-  }
-
   void _showBadgeSnack(Map<String, Object> badge, int verifiedCount) {
     HapticFeedback.lightImpact();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -573,7 +493,8 @@ class _DonorProfileTabState extends State<DonorProfileTab>
                     if (verifiedCount > 0) ...[
                       const SizedBox(height: 10),
                       _buildActionTile(Icons.download_rounded, 'Download Certificate', Colors.green,
-                              () => _downloadCertificate(name, bloodGroup, verifiedCount)),
+                              () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => DonorCertificatesScreen(donorData: widget.donorData, primaryColor: color)))),
                     ],
                     const SizedBox(height: 10),
                     _buildActionTile(Icons.share_rounded, 'Share App', Colors.blue, _shareApp),

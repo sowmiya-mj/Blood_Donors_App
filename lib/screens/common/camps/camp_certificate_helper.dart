@@ -29,6 +29,17 @@ class CampCertificateHelper {
     final isDonation = type == CertificateType.donation;
     final dateStr = DateFormat('d MMMM yyyy').format(date);
 
+    // Same logo asset + fallback pattern as LifetimeCertificateHelper — if
+    // it's ever missing, the certificate still renders (placeholder circle)
+    // instead of crashing the whole download.
+    pw.MemoryImage? logo;
+    try {
+      final logoBytes = await rootBundle.load('assets/images/bloodlink_logo.png');
+      logo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (_) {
+      logo = null;
+    }
+
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4.landscape,
@@ -42,16 +53,20 @@ class CampCertificateHelper {
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             mainAxisAlignment: pw.MainAxisAlignment.center,
             children: [
-              // TODO: replace with pw.Image(logoImage) once bloodlink_logo.png is wired in.
-              pw.Container(
-                width: 56, height: 56,
-                decoration: pw.BoxDecoration(
-                  shape: pw.BoxShape.circle,
-                  color: PdfColor.fromHex('#E8483B'),
+              // Real BloodLink logo when the asset loads; falls back to the
+              // "BL" placeholder circle if it's missing for some reason.
+              if (logo != null)
+                pw.Image(logo, width: 56, height: 56)
+              else
+                pw.Container(
+                  width: 56, height: 56,
+                  decoration: pw.BoxDecoration(
+                    shape: pw.BoxShape.circle,
+                    color: PdfColor.fromHex('#E8483B'),
+                  ),
+                  alignment: pw.Alignment.center,
+                  child: pw.Text('BL', style: pw.TextStyle(color: PdfColors.white, fontSize: 20, fontWeight: pw.FontWeight.bold)),
                 ),
-                alignment: pw.Alignment.center,
-                child: pw.Text('BL', style: pw.TextStyle(color: PdfColors.white, fontSize: 20, fontWeight: pw.FontWeight.bold)),
-              ),
               pw.SizedBox(height: 14),
               pw.Text('BloodLink', style: pw.TextStyle(fontSize: 14, color: PdfColor.fromHex('#888888'), letterSpacing: 2)),
               pw.SizedBox(height: 24),

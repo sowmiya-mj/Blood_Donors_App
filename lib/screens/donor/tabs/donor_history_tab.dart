@@ -339,108 +339,24 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
             builder: (context, snapshot) {
               final donations = snapshot.data?.docs ?? [];
               final totalDonations = donations.length;
-              final totalLives = totalDonations * 3;
-              final totalMl = totalDonations * 450;
-
-              // Badges (and the celebration shower) only count VERIFIED
-              // donations — self-reported entries are for the donor's own
-              // tracking, but shouldn't earn achievements. Someone could
-              // type in 10 fake entries otherwise and hit the 💎 badge
-              // without ever donating.
-              final verifiedCount = donations.where((doc) =>
-              (doc.data() as Map<String, dynamic>)['verified'] == true).length;
-
-              if (snapshot.connectionState != ConnectionState.waiting) {
-                _maybeCelebrate(verifiedCount);
-              }
-
-              return SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.all(20),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Donation History',
-                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                            const SizedBox(height: 4),
-                            Text('Your journey of saving lives',
-                                style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () { HapticFeedback.lightImpact(); _showAddDonationSheet(); },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.add, color: Colors.white, size: 16),
-                            SizedBox(width: 4),
-                            Text('Log Donation', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ]),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  _buildBadgesRow(color, verifiedCount),
-                  const SizedBox(height: 24),
-
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)],
-                            begin: Alignment.topLeft, end: Alignment.bottomRight),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                      _buildSummaryItem('$totalDonations', 'Total\nDonations'),
-                      Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
-                      _buildSummaryItem('$totalLives', 'Lives\nImpacted'),
-                      Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
-                      _buildSummaryItem('${totalMl}ml', 'Blood\nDonated'),
-                    ]),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  const Text('History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
-                  const SizedBox(height: 12),
-
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    Center(child: CircularProgressIndicator(color: color))
-                  else if (donations.isEmpty)
-                    Center(child: Padding(
-                      padding: const EdgeInsets.all(40),
-                      child: Column(children: [
-                        Icon(Icons.favorite_border_rounded, size: 60, color: Colors.grey.shade200),
-                        const SizedBox(height: 12),
-                        Text('No donations logged yet', style: TextStyle(color: Colors.grey.shade400, fontSize: 16, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 6),
-                        Text('Tap "Log Donation" to add your first!', style: TextStyle(color: Colors.grey.shade300, fontSize: 13)),
-                      ]),
-                    ))
-                  else
-                    ...donations.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final data = entry.value.data() as Map<String, dynamic>;
-                      final docId = entry.value.id;
-                      return TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: 1),
-                        duration: Duration(milliseconds: 300 + i * 80),
-                        builder: (context, val, child) => Opacity(
-                            opacity: val, child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child)),
-                        child: _buildDonationCard(data, docId, color),
-                      );
-                    }),
-                ]),
+              return StreamBuilder<QuerySnapshot>(
+                // Volunteering isn't a donation (doesn't count toward
+                // totals/badges above), but Sowmi wants it visible in the
+                // same History timeline — merged in below, tagged
+                // separately from actual donations.
+                stream: FirebaseFirestore.instance
+                    .collection('donors')
+                    .doc(_uid)
+                    .collection('camp_participations')
+                    .snapshots(),
+                builder: (context, volSnapshot) {
+                  final participations = volSnapshot.data?.docs ?? [];
+                  final combined = <_HistoryEntry>[
+                    ...donations.map((d) => _HistoryEntry.donation(d)),
+                    ...participations.map((d) => _HistoryEntry.volunteer(d)),
+                  ]..sort((a, b) => b.date.compareTo(a.date));
+                  return _buildHistoryBody(color, donations, totalDonations, snapshot, combined);
+                },
               );
             },
           ),
@@ -459,6 +375,114 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
               ),
             ),
           ),
+      ]),
+    );
+  }
+
+  Widget _buildHistoryBody(Color color, List<QueryDocumentSnapshot> donations, int totalDonations,
+      AsyncSnapshot<QuerySnapshot> snapshot, List<_HistoryEntry> combined) {
+    final totalLives = totalDonations * 3;
+    final totalMl = totalDonations * 450;
+
+    // Badges (and the celebration shower) only count VERIFIED
+    // donations — self-reported entries are for the donor's own
+    // tracking, but shouldn't earn achievements. Someone could
+    // type in 10 fake entries otherwise and hit the 💎 badge
+    // without ever donating.
+    final verifiedCount = donations.where((doc) =>
+    (doc.data() as Map<String, dynamic>)['verified'] == true).length;
+
+    if (snapshot.connectionState != ConnectionState.waiting) {
+      _maybeCelebrate(verifiedCount);
+    }
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Donation History',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 4),
+                  Text('Your journey of saving lives',
+                      style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () { HapticFeedback.lightImpact(); _showAddDonationSheet(); },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text('Log Donation', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 24),
+
+        _buildBadgesRow(color, verifiedCount),
+        const SizedBox(height: 24),
+
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(20)),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+            _buildSummaryItem('$totalDonations', 'Total\nDonations'),
+            Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
+            _buildSummaryItem('$totalLives', 'Lives\nImpacted'),
+            Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.3)),
+            _buildSummaryItem('${totalMl}ml', 'Blood\nDonated'),
+          ]),
+        ),
+
+        const SizedBox(height: 24),
+
+        const Text('History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+        const SizedBox(height: 12),
+
+        if (snapshot.connectionState == ConnectionState.waiting)
+          Center(child: CircularProgressIndicator(color: color))
+        else if (combined.isEmpty)
+          Center(child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(children: [
+              Icon(Icons.favorite_border_rounded, size: 60, color: Colors.grey.shade200),
+              const SizedBox(height: 12),
+              Text('No donations logged yet', style: TextStyle(color: Colors.grey.shade400, fontSize: 16, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 6),
+              Text('Tap "Log Donation" to add your first!', style: TextStyle(color: Colors.grey.shade300, fontSize: 13)),
+            ]),
+          ))
+        else
+          ...combined.asMap().entries.map((entry) {
+            final i = entry.key;
+            final item = entry.value;
+            return TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: Duration(milliseconds: 300 + i * 80),
+              builder: (context, val, child) => Opacity(
+                  opacity: val, child: Transform.translate(offset: Offset(0, 20 * (1 - val)), child: child)),
+              child: item.isVolunteer
+                  ? _buildParticipationCard(item.data, item.docId, color)
+                  : _buildDonationCard(item.data, item.docId, color),
+            );
+          }),
       ]),
     );
   }
@@ -509,6 +533,7 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
 
   Widget _buildDonationCard(Map<String, dynamic> data, String docId, Color color) {
     final isVerified = data['verified'] == true;
+    final isCamp = data['source'] == 'camp';
     return Dismissible(
       key: Key(docId),
       direction: DismissDirection.endToStart,
@@ -577,6 +602,18 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                           color: isVerified ? Colors.green.shade600 : Colors.grey.shade500)),
                 ]),
               ),
+              if (isCamp) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.campaign_rounded, size: 10, color: color),
+                    const SizedBox(width: 2),
+                    Text('Camp', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: color)),
+                  ]),
+                ),
+              ],
             ]),
             const SizedBox(height: 2),
             Text(data['location'] ?? '', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
@@ -594,6 +631,77 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
         ]),
       ),
     );
+  }
+
+  // Camp volunteer entries — same card language as donation cards (so the
+  // merged timeline reads consistently) but with a blue "Volunteered" tag
+  // instead of a Verified/Self-reported one, since it isn't a donation.
+  Widget _buildParticipationCard(Map<String, dynamic> data, String docId, Color color) {
+    final dateTs = data['date'] as Timestamp?;
+    final dateStr = dateTs != null ? DateFormat('dd MMM yyyy').format(dateTs.toDate()) : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+      child: Row(children: [
+        Container(width: 46, height: 46,
+            decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x1A2196F3)),
+            child: const Icon(Icons.volunteer_activism_rounded, color: Colors.blue, size: 22)),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text('Camp Volunteer',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(6)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.volunteer_activism_rounded, size: 10, color: Colors.blue.shade600),
+                const SizedBox(width: 2),
+                Text('Volunteered', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.blue.shade600)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 2),
+          Text((data['camp_title'] ?? '').toString(), style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          const SizedBox(height: 2),
+          Text(dateStr, style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
+        ])),
+      ]),
+    );
+  }
+}
+
+// Unifies donations + camp_participations into one sortable timeline for
+// the merged History list, without disturbing the donations-only totals/
+// badge math above (those still read straight off the donations list).
+class _HistoryEntry {
+  final bool isVolunteer;
+  final Map<String, dynamic> data;
+  final String docId;
+  final DateTime date;
+
+  _HistoryEntry._(this.isVolunteer, this.data, this.docId, this.date);
+
+  factory _HistoryEntry.donation(QueryDocumentSnapshot doc) {
+    final d = doc.data() as Map<String, dynamic>;
+    DateTime parsed;
+    try {
+      parsed = DateTime.parse(d['date'] as String);
+    } catch (_) {
+      parsed = (d['created_at'] as Timestamp?)?.toDate() ?? DateTime.now();
+    }
+    return _HistoryEntry._(false, d, doc.id, parsed);
+  }
+
+  factory _HistoryEntry.volunteer(QueryDocumentSnapshot doc) {
+    final d = doc.data() as Map<String, dynamic>;
+    final parsed = (d['date'] as Timestamp?)?.toDate() ?? DateTime.now();
+    return _HistoryEntry._(true, d, doc.id, parsed);
   }
 }
 
