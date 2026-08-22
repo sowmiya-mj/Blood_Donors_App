@@ -208,10 +208,8 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                 const SizedBox(width: 12),
                 _buildActionButton(Icons.history_rounded, 'Request\nHistory', Colors.orange, () => widget.onNavigate?.call(1)),
 
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 450,
-                child: GestureDetector(
+                const SizedBox(width: 12),
+                Expanded(child: GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
                     Navigator.push(context, MaterialPageRoute(builder: (_) => MyCampsScreen(
@@ -232,8 +230,7 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
                           style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1.3)),
                     ]),
                   ),
-                ),
-              ),
+                )),
               ]),
             ]),
           )),

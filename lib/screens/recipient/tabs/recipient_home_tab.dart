@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../common/sos/sos_bottom_sheet.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
@@ -287,6 +288,26 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
     );
   }
 
+  Future<void> _callBank(String? phone) async {
+    if (phone == null || phone.isEmpty) return;
+    HapticFeedback.lightImpact();
+    final uri = Uri(scheme: 'tel', path: phone);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    }
+  }
+
   Widget _buildEmptyBloodBank(Color color) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -300,6 +321,7 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
   }
 
   Widget _buildBloodBankCard(Map<String, dynamic> bank, Color color) {
+    final phone = bank['phone']?.toString();
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -321,11 +343,23 @@ class _RecipientHomeTabState extends State<RecipientHomeTab>
           Text('${bank['city'] ?? ''} • ${bank['district'] ?? ''}',
               style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
         ])),
+        const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
           child: Text('Open', style: TextStyle(color: Colors.green.shade600, fontSize: 11, fontWeight: FontWeight.w600)),
         ),
+        if (phone != null && phone.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _callBank(phone),
+            child: Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
+              child: Icon(Icons.call_rounded, color: Colors.green.shade600, size: 18),
+            ),
+          ),
+        ],
       ]),
     );
   }

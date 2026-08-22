@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'tabs/recipient_home_tab.dart';
 import 'tabs/recipient_search_tab.dart';
+import 'tabs/recipient_history_tab.dart';
 import 'tabs/recipient_profile_tab.dart';
 
 class RecipientDashboard extends StatefulWidget {
@@ -27,6 +28,7 @@ class _RecipientDashboardState extends State<RecipientDashboard>
   final List<_NavItem> _navItems = [
     _NavItem(icon: Icons.home_rounded, label: 'Home'),
     _NavItem(icon: Icons.search_rounded, label: 'Search'),
+    _NavItem(icon: Icons.history_rounded, label: 'History'),
     _NavItem(icon: Icons.person_rounded, label: 'Profile'),
   ];
 
@@ -35,7 +37,7 @@ class _RecipientDashboardState extends State<RecipientDashboard>
     super.initState();
     _pageController = PageController();
     _tabControllers = List.generate(
-      3,
+      4,
           (i) => AnimationController(vsync: this, duration: const Duration(milliseconds: 200)),
     );
     _tabControllers[0].forward();
@@ -98,6 +100,7 @@ class _RecipientDashboardState extends State<RecipientDashboard>
         children: [
           RecipientHomeTab(recipientData: _recipientData, primaryColor: _primaryColor),
           RecipientSearchTab(recipientData: _recipientData, primaryColor: _primaryColor),
+          RecipientHistoryTab(recipientData: _recipientData, primaryColor: _primaryColor),
           RecipientProfileTab(recipientData: _recipientData, primaryColor: _primaryColor, onDataUpdated: _fetchRecipientData),
         ],
       ),

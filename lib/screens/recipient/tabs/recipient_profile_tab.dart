@@ -1,6 +1,16 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../recipient_edit_profile_screen.dart';
+import '../../auth/role_selection_screen.dart';
 
 class RecipientProfileTab extends StatefulWidget {
   final Map<String, dynamic>? recipientData;
@@ -22,6 +32,10 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
     with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
+  bool _isUpdatingLocation = false;
+  bool _uploadingPhoto = false;
+
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
   void initState() {
@@ -37,10 +51,197 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
     super.dispose();
   }
 
+  Future<void> _updateMyLocation() async {
+    if (_isUpdatingLocation) return;
+    HapticFeedback.lightImpact();
+    setState(() => _isUpdatingLocation = true);
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        _showSnack('Location permission denied. Enable it in app settings to update.', isError: true);
+        return;
+      }
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _showSnack('Turn on device location (GPS) and try again.', isError: true);
+        return;
+      }
+
+      Position position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 20)),
+        );
+      } on TimeoutException {
+        // Fresh fix timed out (weak signal / indoors) — fall back to last
+        // known position instead of failing outright.
+        final last = await Geolocator.getLastKnownPosition();
+        if (last == null) rethrow;
+        position = last;
+      }
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      await FirebaseFirestore.instance.collection('recipients').doc(uid).update({
+        'last_lat': position.latitude,
+        'last_lng': position.longitude,
+        'location_updated_at': FieldValue.serverTimestamp(),
+      });
+
+      _showSnack('Location updated — nearby searches now use your current spot.');
+      widget.onDataUpdated();
+    } catch (e) {
+      _showSnack('Could not fetch location. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _isUpdatingLocation = false);
+    }
+  }
+
+  void _showSnack(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? Colors.red.shade600 : Colors.green.shade600,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  // ── Profile photo ─────────────────────────────────────────────
+  Future<void> _showPhotoOptions() async {
+    final hasPhoto = widget.recipientData?['photo_path'] != null;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.camera_alt_rounded),
+            title: const Text('Take Photo'),
+            onTap: () => Navigator.pop(ctx, 'camera'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_rounded),
+            title: const Text('Choose from Gallery'),
+            onTap: () => Navigator.pop(ctx, 'gallery'),
+          ),
+          if (hasPhoto)
+            ListTile(
+              leading: Icon(Icons.delete_outline_rounded, color: Colors.red.shade400),
+              title: Text('Remove Photo', style: TextStyle(color: Colors.red.shade400)),
+              onTap: () => Navigator.pop(ctx, 'remove'),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (action == null) return;
+    if (action == 'remove') { await _removePhoto(); return; }
+    await _pickAndUpload(action == 'camera' ? ImageSource.camera : ImageSource.gallery);
+  }
+
+  Future<void> _pickAndUpload(ImageSource source) async {
+    if (kIsWeb) {
+      _showSnack('Profile photos aren\'t available in the web preview yet — try this on the Android app.', isError: true);
+      return;
+    }
+    final picker = ImagePicker();
+    final XFile? file = await picker.pickImage(source: source, maxWidth: 800, imageQuality: 80);
+    if (file == null) return;
+    if (_uid.isEmpty) return;
+
+    HapticFeedback.mediumImpact();
+    setState(() => _uploadingPhoto = true);
+    try {
+      // Copy into the app's own permanent documents folder — the path
+      // image_picker returns points at a temp/cache location that isn't
+      // guaranteed to survive OS storage cleanup.
+      final docsDir = await getApplicationDocumentsDirectory();
+      final savedPath = '${docsDir.path}/recipient_photo_$_uid.jpg';
+      await File(file.path).copy(savedPath);
+
+      await FirebaseFirestore.instance.collection('recipients').doc(_uid).update({'photo_path': savedPath});
+      widget.onDataUpdated();
+      _showSnack('Profile photo updated!');
+    } catch (_) {
+      _showSnack('Could not save photo. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    if (_uid.isEmpty) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _uploadingPhoto = true);
+    try {
+      final path = widget.recipientData?['photo_path'] as String?;
+      // File deletion is a mobile-only concept — on web there's no local
+      // file to delete, just clear the Firestore field below.
+      if (!kIsWeb && path != null) {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      }
+      await FirebaseFirestore.instance.collection('recipients').doc(_uid).update({'photo_path': FieldValue.delete()});
+      widget.onDataUpdated();
+      _showSnack('Profile photo removed');
+    } catch (_) {
+      _showSnack('Could not remove photo. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
+  // ── Share / logout ────────────────────────────────────────────
+  Future<void> _shareApp() async {
+    HapticFeedback.lightImpact();
+    await Share.share(
+      "I'm on BloodLink — a platform that connects blood donors with people who need it urgently. "
+          "Join me and help save lives with a single donation. 🩸",
+      subject: 'Save lives with BloodLink',
+    );
+  }
+
   Future<void> _logout() async {
     HapticFeedback.mediumImpact();
-    await FirebaseAuth.instance.signOut();
-    // TODO: Navigate to role selection
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Logout', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey.shade600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      // Clear the entire navigation stack so Back never returns to the
+      // dashboard after logout, and land on role selection.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+            (route) => false,
+      );
+    }
   }
 
   @override
@@ -54,6 +255,10 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
     final city = data?['city'] ?? '';
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
+    final photoPath = data?['photo_path'] as String?;
+    // dart:io's File has no web implementation — local-device photo storage
+    // is mobile-only by design; on web we fall back to the initials avatar.
+    final hasLocalPhoto = !kIsWeb && photoPath != null && File(photoPath).existsSync();
 
     return SafeArea(
       child: FadeTransition(
@@ -62,7 +267,7 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
           physics: const BouncingScrollPhysics(),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-            // Header
+            // ── Profile Header ──────────────────────────────────
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
@@ -74,33 +279,56 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
                 borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
               ),
               child: Column(children: [
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0.5, end: 1.0),
-                  duration: const Duration(milliseconds: 600),
-                  curve: Curves.elasticOut,
-                  builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
-                  child: Stack(alignment: Alignment.bottomRight, children: [
-                    Container(
-                      width: 90, height: 90,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.2),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 3),
+                GestureDetector(
+                  onTap: _uploadingPhoto ? null : _showPhotoOptions,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.5, end: 1.0),
+                    duration: const Duration(milliseconds: 600),
+                    curve: Curves.elasticOut,
+                    builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      Container(
+                        width: 90, height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.2),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 3),
+                          image: hasLocalPhoto
+                              ? DecorationImage(image: FileImage(File(photoPath!)), fit: BoxFit.cover)
+                              : null,
+                        ),
+                        child: _uploadingPhoto
+                            ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : (!hasLocalPhoto
+                            ? Center(
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : 'R',
+                            style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold),
+                          ),
+                        )
+                            : null),
                       ),
-                      child: Center(
-                        child: Text(
-                          name.isNotEmpty ? name[0].toUpperCase() : 'R',
-                          style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold),
+                      Positioned(
+                        bottom: 0, right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                          child: Text(bloodGroup,
+                              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
                         ),
                       ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                      child: Text(bloodGroup,
-                          style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                  ]),
+                      Positioned(
+                        bottom: 0, left: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                              color: color, shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1.5)),
+                          child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 12),
+                        ),
+                      ),
+                    ]),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(name, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
@@ -137,15 +365,44 @@ class _RecipientProfileTabState extends State<RecipientProfileTab>
                   _InfoItem(Icons.flag_outlined, 'State', state),
                 ], color),
 
+                const SizedBox(height: 10),
+
+                GestureDetector(
+                  onTap: _updateMyLocation,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: color.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(children: [
+                      _isUpdatingLocation
+                          ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: color))
+                          : Icon(Icons.my_location_rounded, color: color, size: 22),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Update My Location', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                        Text('Moved cities? Refresh so nearby search results stay accurate',
+                            style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.7))),
+                      ])),
+                    ]),
+                  ),
+                ),
+
                 const SizedBox(height: 20),
 
                 const Text('Account',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
                 const SizedBox(height: 12),
 
-                _buildActionTile(Icons.edit_rounded, 'Edit Profile', color, () {}),
+                _buildActionTile(Icons.edit_rounded, 'Edit Profile', color, () async {
+                  final updated = await Navigator.push<bool>(context, MaterialPageRoute(
+                      builder: (_) => RecipientEditProfileScreen(recipientData: widget.recipientData, primaryColor: color)));
+                  if (updated == true) widget.onDataUpdated();
+                }),
                 const SizedBox(height: 10),
-                _buildActionTile(Icons.share_rounded, 'Share App', Colors.blue, () {}),
+                _buildActionTile(Icons.share_rounded, 'Share App', Colors.blue, _shareApp),
                 const SizedBox(height: 10),
                 _buildActionTile(Icons.logout_rounded, 'Logout', Colors.red, _logout, isDestructive: true),
 
