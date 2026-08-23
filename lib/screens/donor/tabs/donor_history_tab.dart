@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import '../hospital_certificate_helper.dart';
 
 class DonorHistoryTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -534,6 +535,7 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
   Widget _buildDonationCard(Map<String, dynamic> data, String docId, Color color) {
     final isVerified = data['verified'] == true;
     final isCamp = data['source'] == 'camp';
+    final isHospital = data['source'] == 'sos';
     return Dismissible(
       key: Key(docId),
       direction: DismissDirection.endToStart,
@@ -584,10 +586,9 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
               child: Icon(Icons.favorite_rounded, color: color, size: 22)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
+            Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
               Text(data['type'] ?? 'Whole Blood',
                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E))),
-              const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -602,8 +603,7 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                           color: isVerified ? Colors.green.shade600 : Colors.grey.shade500)),
                 ]),
               ),
-              if (isCamp) ...[
-                const SizedBox(width: 6),
+              if (isCamp)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
@@ -613,7 +613,16 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                     Text('Camp', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: color)),
                   ]),
                 ),
-              ],
+              if (isHospital)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(6)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.local_hospital_rounded, size: 10, color: Colors.red.shade600),
+                    const SizedBox(width: 2),
+                    Text('Hospital', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.red.shade600)),
+                  ]),
+                ),
             ]),
             const SizedBox(height: 2),
             Text(data['location'] ?? '', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
@@ -623,7 +632,38 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                     (data['date'] is String ? data['date'] as String : '') ,
                 style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
           ])),
+          if (isHospital) ...[
+            GestureDetector(
+              onTap: () async {
+                HapticFeedback.lightImpact();
+                DateTime parsedDate;
+                try {
+                  parsedDate = DateTime.parse(data['date'] as String);
+                } catch (_) {
+                  parsedDate = (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now();
+                }
+                try {
+                  await HospitalCertificateHelper.generateAndShare(
+                    donorName: (widget.donorData?['name'] ?? 'Donor').toString(),
+                    bloodGroup: (widget.donorData?['blood_group'] ?? 'N/A').toString(),
+                    hospitalOrLocation: (data['location'] ?? 'BloodLink').toString(),
+                    date: parsedDate,
+                  );
+                } catch (_) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Could not generate certificate. Try again.')));
+                  }
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Icon(Icons.download_rounded, color: color, size: 20),
+              ),
+            ),
+          ],
           Container(
+              margin: const EdgeInsets.only(left: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Text('${data['units'] ?? 1} Unit',

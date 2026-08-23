@@ -18,6 +18,7 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _licenseCtrl;
   late final TextEditingController _phoneCtrl;
+  late final TextEditingController _websiteCtrl;
   late final TextEditingController _cityCtrl;
 
   Map<String, dynamic> _locationData = {};
@@ -37,6 +38,7 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
     _nameCtrl = TextEditingController(text: data?['hospital_name'] ?? '');
     _licenseCtrl = TextEditingController(text: data?['license_no'] ?? '');
     _phoneCtrl = TextEditingController(text: data?['phone'] ?? '');
+    _websiteCtrl = TextEditingController(text: data?['website'] ?? '');
     _cityCtrl = TextEditingController(text: data?['city'] ?? '');
     _selectedState = (data?['state'] as String?)?.isNotEmpty == true ? data!['state'] : null;
     _selectedDistrict = (data?['district'] as String?)?.isNotEmpty == true ? data!['district'] : null;
@@ -48,6 +50,7 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
     _nameCtrl.dispose();
     _licenseCtrl.dispose();
     _phoneCtrl.dispose();
+    _websiteCtrl.dispose();
     _cityCtrl.dispose();
     super.dispose();
   }
@@ -95,6 +98,7 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
         'hospital_name': _nameCtrl.text.trim(),
         'license_no': _licenseCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
+        'website': _websiteCtrl.text.trim(),
         'city': _cityCtrl.text.trim(),
         'district': _selectedDistrict ?? '',
         'state': _selectedState ?? '',
@@ -161,6 +165,14 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
                   if (val.length < 10) return 'Enter a valid phone number';
                   return null;
                 },
+              ),
+              const SizedBox(height: 14),
+              _field(
+                controller: _websiteCtrl,
+                label: 'Website (optional)',
+                icon: Icons.language_outlined,
+                color: color,
+                keyboardType: TextInputType.url,
               ),
 
               const SizedBox(height: 24),
@@ -277,7 +289,9 @@ class _HospitalEditProfileScreenState extends State<HospitalEditProfileScreen> {
       ),
       child: DropdownButtonFormField<String>(
         value: items.contains(value) ? value : null,
-        items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+        isExpanded: true,
+        items: items.map((e) => DropdownMenuItem(
+            value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
         onChanged: enabled ? onChanged : null,
         decoration: InputDecoration(
           labelText: label,

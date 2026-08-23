@@ -1,4 +1,3 @@
-// PLACEMENT: lib/screens/hospital/tabs/hospital_profile_tab.dart (overwrite existing file)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -84,6 +83,7 @@ class _HospitalProfileTabState extends State<HospitalProfileTab> with SingleTick
     final email = data?['email'] ?? '';
     final phone = data?['phone'] ?? '';
     final license = data?['license_no'] ?? '';
+    final website = data?['website'] ?? '';
     final city = data?['city'] ?? '';
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
@@ -151,6 +151,7 @@ class _HospitalProfileTabState extends State<HospitalProfileTab> with SingleTick
                   _Info(Icons.badge_outlined, 'License No', license),
                   _Info(Icons.phone_outlined, 'Phone', phone),
                   _Info(Icons.email_outlined, 'Email', email),
+                  _Info(Icons.language_outlined, 'Website', website),
                 ], color),
 
                 const SizedBox(height: 20),
@@ -191,12 +192,12 @@ class _HospitalProfileTabState extends State<HospitalProfileTab> with SingleTick
           Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(children: [
                 Icon(item.icon, color: color, size: 20), const SizedBox(width: 14),
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(item.label, style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 2),
                   Text(item.value.isEmpty ? 'Not set' : item.value,
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
-                ]),
+                ])),
               ])),
           if (i < items.length - 1) Divider(height: 1, color: Colors.grey.shade100, indent: 50),
         ]);

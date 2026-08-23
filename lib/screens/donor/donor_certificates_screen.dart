@@ -1,9 +1,11 @@
+// PLACEMENT: lib/screens/donor/donor_certificates_screen.dart (overwrite existing file)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'lifetime_certificate_helper.dart';
+import 'hospital_certificate_helper.dart';
 import '../,,/../common/camps/camp_certificate_helper.dart';
 
 // Every certificate here is regenerated on-the-fly at download time from
@@ -47,6 +49,12 @@ class DonorCertificatesScreen extends StatelessWidget {
           final verifiedCount = donationDocs.length;
           final campDonationDocs =
           donationDocs.where((d) => (d.data() as Map)['source'] == 'camp').toList();
+          // SOS-sourced donations — completed via a hospital's blood
+          // request (or any other role's SOS broadcast) and auto-verified
+          // at accept time. See NearbySosSection._acceptDonorOffer /
+          // hospital_home_tab.dart._acceptDonorOffer.
+          final sosDonationDocs =
+          donationDocs.where((d) => (d.data() as Map)['source'] == 'sos').toList();
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -62,6 +70,9 @@ class DonorCertificatesScreen extends StatelessWidget {
                 ...volunteerDocs.map(_CampCertItem.fromParticipation),
               ]..sort((a, b) => b.date.compareTo(a.date));
 
+              final hospitalCerts = sosDonationDocs.map(_HospitalCertItem.fromDonation).toList()
+                ..sort((a, b) => b.date.compareTo(a.date));
+
               final isLoading = donSnap.connectionState == ConnectionState.waiting ||
                   volSnap.connectionState == ConnectionState.waiting;
 
@@ -69,7 +80,7 @@ class DonorCertificatesScreen extends StatelessWidget {
                 return Center(child: CircularProgressIndicator(color: primaryColor));
               }
 
-              if (verifiedCount == 0 && campCerts.isEmpty) {
+              if (verifiedCount == 0 && campCerts.isEmpty && hospitalCerts.isEmpty) {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(40),
@@ -102,6 +113,27 @@ class DonorCertificatesScreen extends StatelessWidget {
                         verifiedCount: verifiedCount,
                       ),
                     ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (hospitalCerts.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, bottom: 8),
+                      child: Text('Hospital Certificates',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
+                    ),
+                    ...hospitalCerts.map((c) => _certTile(
+                      context: context,
+                      icon: Icons.local_hospital_rounded,
+                      iconColor: primaryColor,
+                      title: 'Hospital Certificate',
+                      subtitle: '${c.location} · ${DateFormat('d MMM yyyy').format(c.date)}',
+                      onTap: () => HospitalCertificateHelper.generateAndShare(
+                        donorName: name,
+                        bloodGroup: bloodGroup,
+                        hospitalOrLocation: c.location,
+                        date: c.date,
+                      ),
+                    )),
                     const SizedBox(height: 16),
                   ],
                   if (campCerts.isNotEmpty) ...[
@@ -229,6 +261,30 @@ class _CampCertItem {
       campTitle: (d['camp_title'] ?? 'Blood Camp').toString(),
       organizerName: (d['organizer_name'] ?? 'BloodLink').toString(),
       date: (d['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+}
+
+// donations/{id} where source == 'sos'. 'location' already holds the
+// hospital name (set at accept time from the sos_requests doc's 'hospital'
+// field, falling back to city) — same field the History tab shows today.
+class _HospitalCertItem {
+  final String location;
+  final DateTime date;
+
+  _HospitalCertItem({required this.location, required this.date});
+
+  factory _HospitalCertItem.fromDonation(QueryDocumentSnapshot doc) {
+    final d = doc.data() as Map<String, dynamic>;
+    DateTime parsedDate;
+    try {
+      parsedDate = DateTime.parse(d['date'] as String);
+    } catch (_) {
+      parsedDate = (d['created_at'] as Timestamp?)?.toDate() ?? DateTime.now();
+    }
+    return _HospitalCertItem(
+      location: (d['location'] ?? 'BloodLink').toString(),
+      date: parsedDate,
     );
   }
 }

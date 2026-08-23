@@ -1,7 +1,11 @@
+// PLACEMENT: lib/screens/hospital/tabs/hospital_home_tab.dart (overwrite existing file)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../../../widgets/notification_bell.dart';
 import '../../../widgets/nearby_sos_section.dart';
 import '../../common/camps/my_camps_screen.dart';
@@ -22,6 +26,7 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
   late AnimationController _headerController, _cardController;
   late Animation<double> _headerFade, _cardFade;
   late Animation<Offset> _headerSlide;
+  final Set<String> _actingOnOffer = {}; // "$sosId-$donorUid" mid-transaction, to disable double-tap
 
   @override
   void initState() {
@@ -175,7 +180,8 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
           // Nearby SOS — donor/recipient/other-hospital broadcasts within
           // radius. View/Notify only (role != 'donor', so no accept
           // capability). Own requests hidden here since they're already
-          // managed from the Requests tab above.
+          // managed from the Requests tab above (and offer-review now lives
+          // right on each card in "Active Blood Requests" above too).
           FadeTransition(opacity: _cardFade, child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -256,33 +262,315 @@ class _HospitalHomeTabState extends State<HospitalHomeTab> with TickerProviderSt
   }
 
   Widget _buildRequestCard(Map<String, dynamic> d, String docId, Color color) {
+    final String? sosId = d['sos_request_id'] as String?;
     return Container(
       margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3))]),
-      child: Row(children: [
-        Container(width: 44, height: 44,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.red.shade50),
-            child: Center(child: Text(d['blood_group'] ?? '?',
-                style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)))),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${d['blood_group'] ?? ''} • ${d['units'] ?? 1} unit${(d['units'] ?? 1) > 1 ? 's' : ''} needed',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A2E))),
-          Text(d['patient_name'] ?? 'Patient', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-          Text(d['urgency'] ?? 'Normal', style: TextStyle(
-              color: (d['urgency'] ?? '') == 'Critical' ? Colors.red.shade600 : Colors.orange.shade600,
-              fontSize: 11, fontWeight: FontWeight.w500)),
-        ])),
-        GestureDetector(
-          onTap: () => _markFulfilled(docId),
-          child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
-              child: Text('Fulfilled', style: TextStyle(color: Colors.green.shade600, fontSize: 11, fontWeight: FontWeight.w600))),
-        ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 44, height: 44,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.red.shade50),
+              child: Center(child: Text(d['blood_group'] ?? '?',
+                  style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.bold, fontSize: 13)))),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${d['blood_group'] ?? ''} • ${d['units'] ?? 1} unit${(d['units'] ?? 1) > 1 ? 's' : ''} needed',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF1A1A2E))),
+            Text(d['patient_name'] ?? 'Patient', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+            Text(d['urgency'] ?? 'Normal', style: TextStyle(
+                color: (d['urgency'] ?? '') == 'Critical' ? Colors.red.shade600 : Colors.orange.shade600,
+                fontSize: 11, fontWeight: FontWeight.w500)),
+          ])),
+          GestureDetector(
+            onTap: () => _markFulfilled(docId),
+            child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                child: Text('Fulfilled', style: TextStyle(color: Colors.green.shade600, fontSize: 11, fontWeight: FontWeight.w600))),
+          ),
+        ]),
+        if (sosId != null) _buildOffersSection(sosId, color),
       ]),
     );
+  }
+
+  // Donor-offer review, embedded right in the hospital's own request card.
+  // Mirrors NearbySosSection's isMine review UI (pending offers get
+  // Call/Message/Accept/Decline; accepted ones get a simple confirmed row
+  // with Call) but deliberately does NOT reuse its "Mark done" button —
+  // that only flips the sos_requests mirror, not this blood_requests doc,
+  // which would desync the Requests tab / stats cards above. Fulfilling
+  // stays on the "Fulfilled" button above, which already keeps both in sync.
+  Widget _buildOffersSection(String sosId, Color color) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('sos_requests').doc(sosId)
+          .collection('acceptances').orderBy('offered_at').snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+
+        final pending = docs.where((doc) => (doc.data() as Map<String, dynamic>)['status'] == 'pending').toList();
+        final accepted = docs.where((doc) => (doc.data() as Map<String, dynamic>)['status'] != 'pending').toList();
+
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (pending.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            Text('Offers to review', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+            const SizedBox(height: 6),
+            ...pending.map((doc) {
+              final od = doc.data() as Map<String, dynamic>;
+              final donorUid = doc.id;
+              final busy = _actingOnOffer.contains('$sosId-$donorUid');
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade200)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(od['donor_name'] ?? 'Donor', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${od['donor_blood_group'] ?? ''}'
+                            '${od['donor_age'] != null ? ' • ${od['donor_age']} yrs' : ''}'
+                            '${(od['donor_city'] ?? '').toString().isNotEmpty ? ' • ${od['donor_city']}' : ''}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                    ])),
+                    GestureDetector(onTap: () => _callPhone(od['donor_phone'] ?? ''),
+                        child: Padding(padding: const EdgeInsets.all(4), child: Icon(Icons.call, size: 16, color: color))),
+                    GestureDetector(onTap: () => _messageDonor(od['donor_phone'] ?? ''),
+                        child: Padding(padding: const EdgeInsets.all(4), child: Icon(Icons.sms_outlined, size: 16, color: color))),
+                  ]),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(
+                      onPressed: busy ? null : () => _declineDonorOffer(sosId, donorUid, od),
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.red.shade400, side: BorderSide(color: Colors.red.shade200),
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      child: const Text('Decline', style: TextStyle(fontSize: 11)),
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(child: ElevatedButton(
+                      onPressed: busy ? null : () => _acceptDonorOffer(sosId, donorUid),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      child: busy
+                          ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text('Accept', style: TextStyle(fontSize: 11)),
+                    )),
+                  ]),
+                ]),
+              );
+            }),
+          ],
+          if (accepted.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            ...accepted.map((doc) {
+              final od = doc.data() as Map<String, dynamic>;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Icon(Icons.check_circle, size: 14, color: Colors.green.shade400),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(od['donor_name'] ?? 'Donor', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+                  GestureDetector(
+                    onTap: () => _callPhone(od['donor_phone'] ?? ''),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.call, size: 12, color: color),
+                      const SizedBox(width: 3),
+                      Text('Call', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ]),
+              );
+            }),
+          ],
+        ]);
+      },
+    );
+  }
+
+  Future<void> _callPhone(String phone) async {
+    if (phone.isEmpty) return;
+    HapticFeedback.lightImpact();
+    try {
+      await launchUrl(Uri(scheme: 'tel', path: phone));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open dialer for $phone'), backgroundColor: Colors.red.shade600));
+      }
+    }
+  }
+
+  Future<void> _messageDonor(String phone) async {
+    if (phone.isEmpty) return;
+    HapticFeedback.lightImpact();
+    try {
+      await launchUrl(Uri(scheme: 'sms', path: phone));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open Messages for $phone'), backgroundColor: Colors.red.shade600));
+      }
+    }
+  }
+
+  // Same two-stage offer/accept flow as NearbySosSection's requester side:
+  // re-checks a slot is still open, flips the offer to 'accepted', bumps
+  // units_fulfilled, releases the donor's lock, and writes a verified
+  // donation record (source: 'sos') so their History tab / badges / new
+  // Hospital Certificate all update automatically.
+  Future<void> _acceptDonorOffer(String sosId, String donorUid) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _actingOnOffer.add('$sosId-$donorUid'));
+
+    final docRef = FirebaseFirestore.instance.collection('sos_requests').doc(sosId);
+    final offerRef = docRef.collection('acceptances').doc(donorUid);
+    final donationRef = FirebaseFirestore.instance.collection('donors').doc(donorUid).collection('donations').doc();
+    final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(donorUid);
+
+    try {
+      Map<String, dynamic>? offerData;
+      Map<String, dynamic>? requestData;
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) throw 'gone';
+        requestData = snap.data() as Map<String, dynamic>;
+
+        final offerSnap = await tx.get(offerRef);
+        if (!offerSnap.exists) throw 'gone';
+        offerData = offerSnap.data() as Map<String, dynamic>;
+        if (offerData!['status'] == 'accepted') throw 'already';
+
+        final unitsNeeded = _asInt(requestData!['units']);
+        final unitsFulfilled = _asInt(requestData!['units_fulfilled'], fallback: 0);
+        if (unitsFulfilled >= unitsNeeded) throw 'full';
+
+        tx.update(offerRef, {
+          'status': 'accepted',
+          'accepted_at': FieldValue.serverTimestamp(),
+          'donation_doc_id': donationRef.id,
+        });
+        tx.update(docRef, {'units_fulfilled': unitsFulfilled + 1});
+        tx.update(donorDocRef, {'active_offer_request_id': null});
+        tx.set(donationRef, {
+          'type': 'Whole Blood',
+          'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'date_display': DateFormat('dd MMM yyyy').format(DateTime.now()),
+          'location': '${requestData!['hospital'] ?? requestData!['city'] ?? ''}'
+              '${(requestData!['district'] ?? '').toString().isNotEmpty ? ', ${requestData!['district']}' : ''}',
+          'units': 1,
+          'source': 'sos',
+          'verified': true,
+          'request_id': sosId,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }).timeout(const Duration(seconds: 10));
+
+      final donorName = offerData?['donor_name'] ?? 'The donor';
+      FirebaseFirestore.instance.collection('notifications').doc(donorUid).collection('items').add({
+        'type': 'sos_help_accepted',
+        'title': 'Your help is accepted! 🎉',
+        'body': 'Thank you! Your donation for the ${requestData?['blood_group'] ?? ''} request has been confirmed.',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$donorName confirmed! They have been notified.'),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        String msg;
+        if (e.toString().contains('already')) {
+          msg = 'This offer is already confirmed';
+        } else if (e.toString().contains('full')) {
+          msg = 'All units for this request are already covered';
+        } else if (e is TimeoutException) {
+          msg = 'Timed out — check Firestore rules allow this update';
+        } else {
+          msg = 'Could not confirm this donor: $e';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _actingOnOffer.remove('$sosId-$donorUid'));
+    }
+  }
+
+  Future<void> _declineDonorOffer(String sosId, String donorUid, Map<String, dynamic> offerData) async {
+    HapticFeedback.lightImpact();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Decline this offer?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('${offerData['donor_name'] ?? 'This donor'} will be notified so they can help someone else.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Cancel', style: TextStyle(color: Colors.grey.shade600))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              child: const Text('Decline')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final offerRef = FirebaseFirestore.instance.collection('sos_requests').doc(sosId)
+          .collection('acceptances').doc(donorUid);
+      final donorDocRef = FirebaseFirestore.instance.collection('donors').doc(donorUid);
+
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final donorSnap = await tx.get(donorDocRef);
+        String? currentActiveId;
+        if (donorSnap.exists) {
+          currentActiveId = donorSnap.data()?['active_offer_request_id'] as String?;
+        }
+        tx.delete(offerRef);
+        if (currentActiveId == sosId) {
+          tx.update(donorDocRef, {'active_offer_request_id': null});
+        }
+      });
+
+      final requestSnap = await FirebaseFirestore.instance.collection('sos_requests').doc(sosId).get();
+      final bloodGroup = (requestSnap.data()?['blood_group'] ?? '').toString();
+      FirebaseFirestore.instance.collection('notifications').doc(donorUid).collection('items').add({
+        'type': 'sos_declined',
+        'title': 'Offer declined',
+        'body': 'Your offer to help the $bloodGroup request wasn\'t needed this time. Thanks for stepping up!',
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
+    } catch (_) {}
+  }
+
+  static int _asInt(dynamic v, {int fallback = 1}) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? fallback;
   }
 
   Future<void> _markFulfilled(String docId) async {
