@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../hospital_certificate_helper.dart';
+import '../blood_bank_certificate_helper.dart';
 
 class DonorHistoryTab extends StatefulWidget {
   final Map<String, dynamic>? donorData;
@@ -536,6 +537,7 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
     final isVerified = data['verified'] == true;
     final isCamp = data['source'] == 'camp';
     final isHospital = data['source'] == 'sos';
+    final isBloodBank = data['source'] == 'blood_bank';
     return Dismissible(
       key: Key(docId),
       direction: DismissDirection.endToStart,
@@ -623,6 +625,16 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                     Text('Hospital', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.red.shade600)),
                   ]),
                 ),
+              if (isBloodBank)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(6)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.water_drop_rounded, size: 10, color: Colors.teal.shade600),
+                    const SizedBox(width: 2),
+                    Text('Blood Bank', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.teal.shade600)),
+                  ]),
+                ),
             ]),
             const SizedBox(height: 2),
             Text(data['location'] ?? '', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
@@ -647,6 +659,36 @@ class _DonorHistoryTabState extends State<DonorHistoryTab>
                     donorName: (widget.donorData?['name'] ?? 'Donor').toString(),
                     bloodGroup: (widget.donorData?['blood_group'] ?? 'N/A').toString(),
                     hospitalOrLocation: (data['location'] ?? 'BloodLink').toString(),
+                    date: parsedDate,
+                  );
+                } catch (_) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Could not generate certificate. Try again.')));
+                  }
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Icon(Icons.download_rounded, color: color, size: 20),
+              ),
+            ),
+          ],
+          if (isBloodBank) ...[
+            GestureDetector(
+              onTap: () async {
+                HapticFeedback.lightImpact();
+                DateTime parsedDate;
+                try {
+                  parsedDate = DateTime.parse(data['date'] as String);
+                } catch (_) {
+                  parsedDate = (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now();
+                }
+                try {
+                  await BloodBankCertificateHelper.generateAndShare(
+                    donorName: (widget.donorData?['name'] ?? 'Donor').toString(),
+                    bloodGroup: (widget.donorData?['blood_group'] ?? 'N/A').toString(),
+                    bankOrLocation: (data['location'] ?? 'BloodLink').toString(),
                     date: parsedDate,
                   );
                 } catch (_) {
