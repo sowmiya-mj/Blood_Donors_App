@@ -16,7 +16,7 @@ enum CertificateType { donation, volunteer }
 // (same libraries: pdf + printing) so merging should be low-friction.
 // The bloodlink_logo.png wiring TODO from earlier sessions applies here
 // too — swap the placeholder circle below for a pw.Image once the asset
-// is in pubspec.yaml.
+// is in pubspec.yaml..
 class CampCertificateHelper {
   static Future<void> generateAndShare({
     required String donorName,

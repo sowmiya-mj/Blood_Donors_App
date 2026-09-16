@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart';
+import '../doctor_edit_profile_screen.dart';
+import '../../auth/role_selection_screen.dart';
 
 class DoctorProfileTab extends StatefulWidget {
   final Map<String, dynamic>? doctorData;
@@ -39,6 +42,22 @@ class _DoctorProfileTabState extends State<DoctorProfileTab>
     super.dispose();
   }
 
+  Future<void> _shareApp() async {
+    HapticFeedback.lightImpact();
+    await Share.share(
+      "I'm on BloodLink — a platform that connects blood donors with people who need it urgently. "
+          "Join me and help save lives with a single donation. 🩸",
+      subject: 'Save lives with BloodLink',
+    );
+  }
+
+  Future<void> _editProfile() async {
+    final updated = await Navigator.push<bool>(context, MaterialPageRoute(
+        builder: (_) => DoctorEditProfileScreen(
+            doctorData: widget.doctorData, primaryColor: widget.primaryColor)));
+    if (updated == true) widget.onDataUpdated();
+  }
+
   Future<void> _logout() async {
     HapticFeedback.mediumImpact();
     final confirm = await showDialog<bool>(
@@ -66,7 +85,13 @@ class _DoctorProfileTabState extends State<DoctorProfileTab>
     );
     if (confirm == true) {
       await FirebaseAuth.instance.signOut();
-      // TODO: Navigate to role selection
+      if (!mounted) return;
+      // Clear the entire navigation stack so Back never returns to the
+      // dashboard after logout, and land on role selection.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+            (route) => false,
+      );
     }
   }
 
@@ -82,7 +107,8 @@ class _DoctorProfileTabState extends State<DoctorProfileTab>
     final license = data?['license_no'] ??
         data?['license_number'] ??
         data?['license'] ??
-        '';    final city = data?['city'] ?? '';
+        '';
+    final city = data?['city'] ?? '';
     final district = data?['district'] ?? '';
     final state = data?['state'] ?? '';
 
@@ -200,9 +226,9 @@ class _DoctorProfileTabState extends State<DoctorProfileTab>
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
                 const SizedBox(height: 12),
 
-                _buildActionTile(Icons.edit_rounded, 'Edit Profile', color, () {}),
+                _buildActionTile(Icons.edit_rounded, 'Edit Profile', color, _editProfile),
                 const SizedBox(height: 10),
-                _buildActionTile(Icons.share_rounded, 'Share App', Colors.blue, () {}),
+                _buildActionTile(Icons.share_rounded, 'Share App', Colors.blue, _shareApp),
                 const SizedBox(height: 10),
                 _buildActionTile(Icons.logout_rounded, 'Logout', Colors.red, _logout,
                     isDestructive: true),

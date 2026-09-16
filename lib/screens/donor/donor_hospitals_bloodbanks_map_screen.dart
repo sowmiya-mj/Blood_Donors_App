@@ -116,7 +116,42 @@ class _DonorHospitalsBloodBanksMapScreenState extends State<DonorHospitalsBloodB
     if (phone == null || phone.isEmpty) return;
     HapticFeedback.lightImpact();
     final uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open dialer')),
+        );
+      }
+    }
+  }
+
+  Future<void> _messageFacility(String? phone) async {
+    if (phone == null || phone.isEmpty) return;
+    HapticFeedback.lightImpact();
+    // Opens the native Messages app — no in-app chat yet, this is the
+    // lightweight version until a real chat feature gets built.
+    final uri = Uri(scheme: 'sms', path: phone);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Messages app')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Messages app')),
+        );
+      }
+    }
   }
 
   List<_LocationCluster> get _filteredClusters {
@@ -262,6 +297,74 @@ class _DonorHospitalsBloodBanksMapScreenState extends State<DonorHospitalsBloodB
     );
   }
 
+  void _showFacilityDetailSheet(_Facility f, Color color) {
+    HapticFeedback.lightImpact();
+    final isHospital = f.type == _FacilityType.hospital;
+    final typeColor = isHospital ? Colors.blue.shade600 : Colors.red.shade600;
+    final location = [f.city, f.district, f.state].where((e) => e != null && e.toString().isNotEmpty).join(', ');
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(width: 56, height: 56,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: typeColor.withValues(alpha: 0.1)),
+                child: Icon(isHospital ? Icons.local_hospital_rounded : Icons.bloodtype_rounded, color: typeColor, size: 26)),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(f.name, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+              const SizedBox(height: 4),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                  child: Text(isHospital ? 'Hospital' : 'Blood Bank',
+                      style: TextStyle(fontSize: 11, color: typeColor, fontWeight: FontWeight.w600))),
+            ])),
+          ]),
+          const SizedBox(height: 20),
+          if (location.isNotEmpty) _detailRow(Icons.location_on_outlined, 'Location', location, color),
+          if (f.phone != null && f.phone!.isNotEmpty) _detailRow(Icons.phone_outlined, 'Phone', f.phone!, color),
+          const SizedBox(height: 20),
+          if (f.phone != null && f.phone!.isNotEmpty)
+            Row(children: [
+              Expanded(child: ElevatedButton.icon(
+                onPressed: () { Navigator.pop(ctx); _callFacility(f.phone); },
+                icon: const Icon(Icons.call_rounded, size: 18),
+                label: const Text('Call'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton.icon(
+                onPressed: () { Navigator.pop(ctx); _messageFacility(f.phone); },
+                icon: const Icon(Icons.message_rounded, size: 18),
+                label: const Text('Message'),
+                style: OutlinedButton.styleFrom(foregroundColor: color, side: BorderSide(color: color),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              )),
+            ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 12),
+        Text('$label: ', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E)))),
+      ]),
+    );
+  }
+
   Widget _buildFacilityCard(_Facility f, Color color) {
     final isHospital = f.type == _FacilityType.hospital;
     final typeColor = isHospital ? Colors.blue.shade600 : Colors.red.shade600;
@@ -269,32 +372,58 @@ class _DonorHospitalsBloodBanksMapScreenState extends State<DonorHospitalsBloodB
       margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
-      child: Row(children: [
-        Container(width: 46, height: 46,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: typeColor.withValues(alpha: 0.1)),
-            child: Icon(isHospital ? Icons.local_hospital_rounded : Icons.bloodtype_rounded, color: typeColor, size: 22)),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(child: Text(f.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E)))),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(isHospital ? 'Hospital' : 'Blood Bank',
-                    style: TextStyle(fontSize: 9, color: typeColor, fontWeight: FontWeight.w600))),
-          ]),
-          const SizedBox(height: 2),
-          Text([f.city, f.district, f.state].where((e) => e != null && e.toString().isNotEmpty).join(', '),
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-        ])),
-        if (f.phone != null && f.phone!.isNotEmpty)
-          GestureDetector(
-            onTap: () => _callFacility(f.phone),
-            child: Container(
-              padding: const EdgeInsets.all(9),
-              decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
-              child: Icon(Icons.call_rounded, color: Colors.green.shade600, size: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 46, height: 46,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: typeColor.withValues(alpha: 0.1)),
+              child: Icon(isHospital ? Icons.local_hospital_rounded : Icons.bloodtype_rounded, color: typeColor, size: 22)),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text(f.name, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1A1A2E)))),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                  child: Text(isHospital ? 'Hospital' : 'Blood Bank',
+                      style: TextStyle(fontSize: 9, color: typeColor, fontWeight: FontWeight.w600))),
+            ]),
+            const SizedBox(height: 2),
+            Text([f.city, f.district, f.state].where((e) => e != null && e.toString().isNotEmpty).join(', '),
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          ])),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
+            onPressed: () => _showFacilityDetailSheet(f, color),
+            icon: const Icon(Icons.info_outline_rounded, size: 16),
+            label: const Text('View Details', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: color, side: BorderSide(color: color.withValues(alpha: 0.4)),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          )),
+          if (f.phone != null && f.phone!.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _callFacility(f.phone),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10)),
+                child: Icon(Icons.call_rounded, color: Colors.green.shade600, size: 18),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _messageFacility(f.phone),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                child: Icon(Icons.message_rounded, color: color, size: 18),
+              ),
+            ),
+          ],
+        ]),
       ]),
     );
   }
