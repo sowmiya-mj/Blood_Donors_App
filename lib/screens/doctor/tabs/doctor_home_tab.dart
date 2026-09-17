@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../widgets/notification_bell.dart';
+import '../../common/sos/sos_bottom_sheet.dart';
+import '../../../widgets/nearby_sos_section.dart';
 
 
 class DoctorHomeTab extends StatefulWidget {
@@ -38,6 +40,36 @@ class _DoctorHomeTabState extends State<DoctorHomeTab> with TickerProviderStateM
 
   @override
   void dispose() { _headerController.dispose(); _cardController.dispose(); super.dispose(); }
+
+  // A doctor raises this on a patient's behalf — same sos_requests doc the
+  // Recipient/Donor flow uses, so it shows up in every donor's Nearby SOS
+  // normally. Patient name/phone/city fields come pre-filled from the
+  // doctor's own profile (editable) since a doctor has no "patient record"
+  // of their own to pull from yet — same trade-off Recipient's sheet makes.
+  void _openSosSheet() {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SOSBottomSheet(
+          userData: widget.doctorData,
+          primaryColor: widget.primaryColor,
+          onSOSSent: () {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text('SOS sent — nearby donors have been notified'),
+              backgroundColor: Colors.green.shade600,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ));
+          },
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +173,53 @@ class _DoctorHomeTabState extends State<DoctorHomeTab> with TickerProviderStateM
                 _buildActionButton(Icons.person_rounded, 'My\nProfile', Colors.orange,
                         () => widget.onNavigateToTab(3)),
               ]),
+            ]),
+          )),
+
+          const SizedBox(height: 20),
+
+          // Raise SOS — doctor posts on a patient's behalf, same sos_requests
+          // flow Recipient/Donor use, so it's visible in every donor's Nearby SOS.
+          FadeTransition(opacity: _cardFade, child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: GestureDetector(
+              onTap: _openSosSheet,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [Colors.red.shade600, Colors.red.shade400],
+                        begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [BoxShadow(color: Colors.red.withValues(alpha: 0.25), blurRadius: 10, offset: const Offset(0, 4))]),
+                child: Row(children: [
+                  Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+                      child: const Icon(Icons.sos_rounded, color: Colors.white, size: 24)),
+                  const SizedBox(width: 14),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Raise SOS Request', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text('Need blood urgently for a patient? Alert nearby donors.',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 11.5, height: 1.3)),
+                  ])),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 16),
+                ]),
+              ),
+            ),
+          )),
+
+          const SizedBox(height: 20),
+
+          // Nearby SOS Requests — view-only for a doctor (no "I'll Help"; only
+          // donors can accept), plus Mark-done on any SOS the doctor raised.
+          FadeTransition(opacity: _cardFade, child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Nearby SOS Requests',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+              const SizedBox(height: 12),
+              NearbySosSection(color: color, role: 'doctor', userData: data),
             ]),
           )),
 

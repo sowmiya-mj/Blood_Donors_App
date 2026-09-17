@@ -88,9 +88,10 @@ class RoleSelectionScreen extends StatelessWidget {
                             _roleCard(
                               context,
                               icon: Icons.bloodtype,
-                              title: "Recipient",
+                              title: "Requester",
                               subtitle: "Find Blood Quickly",
                               color: Colors.deepPurple,
+                              roleValue: "Recipient",
                             ),
                             _roleCard(
                               context,
@@ -140,9 +141,10 @@ class RoleSelectionScreen extends StatelessWidget {
                               child: _roleCard(
                                 context,
                                 icon: Icons.bloodtype,
-                                title: "Recipient",
+                                title: "Requester",
                                 subtitle: "Find Blood Quickly",
                                 color: Colors.deepPurple,
+                                roleValue: "Recipient",
                               ),
                             ),
                             SizedBox(
@@ -198,6 +200,11 @@ class RoleSelectionScreen extends StatelessWidget {
         required String title,
         required String subtitle,
         required Color color,
+        // Internal routing/login value — stays "Recipient" even when the
+        // displayed title is renamed, so LoginScreen/dashboard routing
+        // (which matches on this string elsewhere in the app) keeps working
+        // without touching every file that checks role == 'Recipient'.
+        String? roleValue,
       }) {
     return InkWell(
       borderRadius: BorderRadius.circular(22),
@@ -205,7 +212,7 @@ class RoleSelectionScreen extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => LoginScreen(role: title),
+            builder: (_) => LoginScreen(role: roleValue ?? title),
           ),
         );
       },
